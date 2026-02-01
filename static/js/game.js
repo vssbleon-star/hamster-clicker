@@ -1,303 +1,455 @@
-// Основные функции игры
 class HamsterGame {
     constructor() {
         this.coins = 100;
-        this.power = 1;
+        this.energy = 100;
+        this.maxEnergy = 100;
+        this.energyRegen = 1;
+        this.clickPower = 1;
         this.autos = 0;
         this.multiplier = 1;
+        this.prestige = 0;
+        this.level = 1;
+        this.experience = 0;
         this.totalClicks = 0;
+        
         this.userId = null;
         this.username = 'Игрок';
+        this.upgrades = {};
+        this.achievements = [];
+        
+        this.init();
     }
     
-    init() {
-        console.log('Инициализация игры...');
-        
-        // Telegram WebApp
-        if (window.Telegram && window.Telegram.WebApp) {
-            const tg = window.Telegram.WebApp;
+    async init() {
+        // Telegram
+        if (window.Telegram && Telegram.WebApp) {
+            const tg = Telegram.WebApp;
             tg.expand();
             tg.ready();
             
-            this.userId = tg.initDataUnsafe.user?.id || 'user_' + Math.random().toString(36).substr(2, 9);
-            this.username = tg.initDataUnsafe.user?.username || tg.initDataUnsafe.user?.first_name || 'Игрок';
+            this.userId = tg.initDataUnsafe.user?.id || 'user_' + Date.now();
+            this.username = tg.initDataUnsafe.user?.username || 
+                           tg.initDataUnsafe.user?.first_name || 'Игрок';
             
-            console.log('Telegram WebApp инициализирован:', this.userId, this.username);
+            if (tg.colorScheme === 'dark') {
+                document.body.classList.add('dark-mode');
+            }
         }
         
         this.loadGame();
         this.setupEventListeners();
-        this.startAutoClickers();
-        this.updateDisplay();
+        this.startGameLoop();
+        this.updateUI();
+        this.loadUpgrades();
+        this.loadAchievements();
+        this.updateLeaderboard('coins');
         
-        // Проверяем изображение хомяка
-        this.checkHamsterImage();
+        // Тест изображений
+        this.testImages();
     }
     
-    checkHamsterImage() {
-        const hamsterImg = document.getElementById('hamsterImage');
-        if (!hamsterImg) return;
-        
-        hamsterImg.onload = () => {
-            console.log('Изображение хомяка загружено');
-            document.getElementById('hamsterFace').style.display = 'none';
-            hamsterImg.style.display = 'block';
-        };
-        
-        hamsterImg.onerror = () => {
-            console.log('Изображение не найдено, показываем графическое лицо');
-            hamsterImg.style.display = 'none';
-            document.getElementById('hamsterFace').style.display = 'block';
-        };
-        
-        // Проверяем загружено ли изображение
-        if (hamsterImg.complete) {
-            if (hamsterImg.naturalWidth > 0) {
-                hamsterImg.onload();
-            } else {
-                hamsterImg.onerror();
-            }
-        }
+    testImages() {
+        const images = ['hamster.png', 'coin.png', 'background.png'];
+        images.forEach(img => {
+            const test = new Image();
+            test.src = `/static/images/${img}`;
+            test.onload = () => console.log(`✅ ${img} загружен`);
+            test.onerror = () => console.error(`❌ ${img} не найден`);
+        });
     }
     
-    loadGame() {
-        // Загрузка из localStorage
-        const saved = localStorage.getItem('hamster_save');
-        if (saved) {
-            try {
-                const data = JSON.parse(saved);
-                this.coins = data.coins || 100;
-                this.power = data.power || 1;
-                this.autos = data.autos || 0;
-                this.multiplier = data.multiplier || 1;
-                this.totalClicks = data.totalClicks || 0;
-                console.log('Игра загружена из сохранения');
-            } catch (e) {
-                console.error('Ошибка загрузки сохранения:', e);
+    async loadGame() {
+        try {
+            const res = await fetch(`/api/user/${this.userId}`);
+            const data = await res.json();
+            
+            if (data.coins) {
+                this.coins = parseFloat(data.coins);
+                this.energy = parseFloat(data.energy);
+                this.maxEnergy = parseInt(data.max_energy);
+                this.energyRegen = parseFloat(data.energy_regen);
+                this.clickPower = parseFloat(data.click_power);
+                this.autos = parseInt(data.autos);
+                this.multiplier = parseFloat(data.multiplier);
+                this.prestige = parseInt(data.prestige);
+                this.level = parseInt(data.level);
+                this.experience = parseFloat(data.experience);
+                this.totalClicks = parseInt(data.total_clicks) || 0;
             }
+        } catch (e) {
+            console.log('Нет сохранения на сервере');
         }
+        
+        // Локальное сохранение
+        const local = localStorage.getItem(`hamster_${this.userId}`);
+        if (local) {
+            const data = JSON.parse(local);
+            Object.assign(this, data);
+        }
+        
+        this.saveGame();
     }
     
     saveGame() {
-        const data = {
+        // Локально
+        const saveData = {
             coins: this.coins,
-            power: this.power,
+            energy: this.energy,
+            maxEnergy: this.maxEnergy,
+            energyRegen: this.energyRegen,
+            clickPower: this.clickPower,
             autos: this.autos,
             multiplier: this.multiplier,
+            prestige: this.prestige,
+            level: this.level,
+            experience: this.experience,
             totalClicks: this.totalClicks,
             saveTime: Date.now()
         };
         
-        localStorage.setItem('hamster_save', JSON.stringify(data));
-        console.log('Игра сохранена');
+        localStorage.setItem(`hamster_${this.userId}`, JSON.stringify(saveData));
         
-        // Сохраняем на сервер если есть userId
-        if (this.userId) {
-            this.saveToServer();
-        }
+        // На сервер
+        fetch('/api/save', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                user_id: this.userId,
+                username: this.username,
+                coins: this.coins,
+                energy: this.energy,
+                max_energy: this.maxEnergy,
+                energy_regen: this.energyRegen,
+                click_power: this.clickPower,
+                autos: this.autos,
+                multiplier: this.multiplier,
+                total_clicks: this.totalClicks,
+                prestige: this.prestige,
+                level: this.level,
+                experience: this.experience
+            })
+        });
     }
     
-    async saveToServer() {
-        try {
-            const response = await fetch('/api/save', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    user_id: this.userId,
-                    username: this.username,
-                    coins: this.coins,
-                    power: this.power,
-                    autos: this.autos,
-                    multiplier: this.multiplier,
-                    total_clicks: this.totalClicks
-                })
-            });
+    click() {
+        if (this.energy >= 1) {
+            const earned = this.clickPower * this.multiplier * (1 + this.prestige * 0.1);
+            this.coins += earned;
+            this.energy -= 1;
+            this.totalClicks++;
+            this.addExperience(0.5);
             
-            const result = await response.json();
-            console.log('Сохранено на сервере:', result);
-        } catch (error) {
-            console.error('Ошибка сохранения на сервере:', error);
+            // Эффект
+            this.createEffect(`+${earned.toFixed(2)} 💰`, '#ffd700');
+            
+            this.updateUI();
+            this.saveGame();
+            this.checkAchievements();
+            
+            return earned;
+        } else {
+            this.createEffect('❌ Нет энергии!', '#ff4444');
+            return 0;
         }
     }
     
-    clickHamster(event) {
-        const earned = this.power * this.multiplier;
-        this.coins += earned;
-        this.totalClicks++;
+    addExperience(amount) {
+        this.experience += amount;
+        const needed = this.level * 100;
         
-        // Анимация
-        const hamster = document.getElementById('hamsterBtn');
-        if (hamster) {
-            hamster.style.transform = 'scale(0.95)';
-            setTimeout(() => hamster.style.transform = 'scale(1)', 100);
+        if (this.experience >= needed) {
+            this.experience -= needed;
+            this.level++;
+            this.coins += this.level * 100;
+            this.createEffect(`🎉 Уровень ${this.level}!`, '#00ff88');
         }
-        
-        // Создаем эффект
-        if (event) {
-            this.createEffect(event.clientX, event.clientY, `+${earned} 🪙`, '#f59e0b');
-        }
-        
-        this.updateDisplay();
-        this.saveGame();
-        
-        return earned;
     }
     
-    buyUpgrade() {
-        const cost = 50 * this.power;
+    buyUpgrade(id, cost) {
         if (this.coins >= cost) {
             this.coins -= cost;
-            this.power += 1;
-            this.updateDisplay();
-            this.saveGame();
-            this.showNotification(`💪 Сила увеличена до ${this.power}!`);
-            return true;
-        }
-        this.showNotification(`❌ Нужно ${cost} монет!`);
-        return false;
-    }
-    
-    buyAutoClicker() {
-        const cost = 100 + (this.autos * 50);
-        if (this.coins >= cost) {
-            this.coins -= cost;
-            this.autos += 1;
-            this.updateDisplay();
-            this.saveGame();
-            this.showNotification(`🤖 Авто-кликер #${this.autos}!`);
-            return true;
-        }
-        this.showNotification(`❌ Нужно ${cost} монет!`);
-        return false;
-    }
-    
-    updateDisplay() {
-        const elements = {
-            coins: document.getElementById('coins'),
-            power: document.getElementById('power'),
-            autos: document.getElementById('autos'),
-            multiplier: document.getElementById('multiplier'),
-            upgradeCost: document.getElementById('upgradeCost'),
-            autoCost: document.getElementById('autoCost')
-        };
-        
-        for (const [id, element] of Object.entries(elements)) {
-            if (element) {
-                if (id === 'coins') element.textContent = this.coins;
-                else if (id === 'power') element.textContent = this.power;
-                else if (id === 'autos') element.textContent = this.autos;
-                else if (id === 'multiplier') element.textContent = this.multiplier + 'x';
-                else if (id === 'upgradeCost') element.textContent = 50 * this.power;
-                else if (id === 'autoCost') element.textContent = 100 + (this.autos * 50);
+            
+            switch(id) {
+                case 'click_power':
+                    this.clickPower *= 1.1;
+                    break;
+                case 'max_energy':
+                    this.maxEnergy += 50;
+                    break;
+                case 'energy_regen':
+                    this.energyRegen *= 1.2;
+                    break;
+                case 'auto_clicker':
+                    this.autos++;
+                    break;
+                case 'multiplier':
+                    this.multiplier *= 1.5;
+                    break;
             }
+            
+            this.createEffect(`✅ Улучшение куплено!`, '#00ff88');
+            this.updateUI();
+            this.saveGame();
+            return true;
+        } else {
+            this.createEffect(`❌ Нужно ${cost} монет!`, '#ff4444');
+            return false;
         }
     }
     
-    createEffect(x, y, text, color) {
+    async prestige() {
+        if (this.coins >= 1000000) {
+            this.prestige++;
+            const bonus = this.coins * 0.1;
+            this.coins = 100 + bonus;
+            this.energy = 100;
+            this.maxEnergy = 100;
+            this.energyRegen = 1;
+            this.clickPower = 1;
+            this.autos = 0;
+            this.multiplier = 1;
+            this.level = 1;
+            this.experience = 0;
+            
+            this.createEffect(`👑 Престиж ${this.prestige}! +${bonus} монет`, '#ffd700');
+            this.updateUI();
+            this.saveGame();
+        } else {
+            this.createEffect('❌ Нужно 1,000,000 монет!', '#ff4444');
+        }
+    }
+    
+    updateUI() {
+        // Основные значения
+        document.getElementById('coins').textContent = this.coins.toFixed(2);
+        document.getElementById('energy').textContent = 
+            `${this.energy.toFixed(1)}/${this.maxEnergy}`;
+        document.getElementById('clickPower').textContent = this.clickPower.toFixed(2);
+        
+        // Бары
+        const energyPercent = (this.energy / this.maxEnergy) * 100;
+        document.getElementById('energyFill').style.width = energyPercent + '%';
+        
+        const xpPercent = (this.experience / (this.level * 100)) * 100;
+        document.getElementById('levelFill').style.width = xpPercent + '%';
+        
+        // Тексты
+        document.getElementById('level').textContent = this.level;
+        document.getElementById('xp').textContent = this.experience.toFixed(1);
+        document.getElementById('xpNeeded').textContent = this.level * 100;
+        document.getElementById('currentClick').textContent = 
+            (this.clickPower * this.multiplier * (1 + this.prestige * 0.1)).toFixed(2);
+        document.getElementById('autoIncome').textContent = (this.autos * 0.5).toFixed(2);
+        document.getElementById('prestige').textContent = this.prestige;
+        document.getElementById('currentPrestige').textContent = this.prestige;
+        document.getElementById('prestigeBonus').textContent = (this.prestige * 10) + '%';
+        document.getElementById('prestigeRequirement').textContent = '1,000,000';
+    }
+    
+    createEffect(text, color) {
         const effect = document.createElement('div');
         effect.textContent = text;
         effect.style.cssText = `
             position: fixed;
-            left: ${x}px;
-            top: ${y}px;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
             color: ${color};
+            font-size: 24px;
             font-weight: bold;
-            font-size: 18px;
+            text-shadow: 0 0 10px ${color};
             z-index: 1000;
             pointer-events: none;
             animation: floatUp 1s forwards;
-            transform: translate(-50%, -50%);
         `;
         
         document.body.appendChild(effect);
         setTimeout(() => effect.remove(), 1000);
     }
     
-    showNotification(text) {
-        const notification = document.createElement('div');
-        notification.textContent = text;
-        notification.style.cssText = `
-            position: fixed;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0,0,0,0.8);
-            color: white;
-            padding: 12px 24px;
-            border-radius: 12px;
-            z-index: 1000;
-            animation: slideDown 0.3s ease-out;
-            border-left: 4px solid #f59e0b;
-            max-width: 90%;
-            box-shadow: 0 5px 20px rgba(0,0,0,0.3);
-        `;
-        
-        document.body.appendChild(notification);
-        setTimeout(() => notification.remove(), 2000);
-    }
-    
     setupEventListeners() {
-        // Клик по хомяку
-        const hamsterEl = document.getElementById('hamsterBtn');
-        if (hamsterEl) {
-            hamsterEl.addEventListener('click', (e) => {
-                this.clickHamster(e);
+        // Клик хомяка
+        const hamster = document.getElementById('hamsterBtn');
+        if (hamster) {
+            hamster.addEventListener('click', (e) => {
+                const earned = this.click();
                 
-                // Вибрация если доступна
-                if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.HapticFeedback) {
-                    window.Telegram.WebApp.HapticFeedback.impactOccurred('light');
+                // Анимация
+                hamster.style.transform = 'scale(0.95)';
+                setTimeout(() => hamster.style.transform = 'scale(1)', 100);
+                
+                // Вибро
+                if (window.Telegram && Telegram.WebApp?.HapticFeedback) {
+                    Telegram.WebApp.HapticFeedback.impactOccurred('light');
                 }
+                
+                // Частицы
+                this.createParticles(e.clientX, e.clientY);
             });
         }
-        
-        // Кнопки улучшений
-        const upgradeBtn = document.querySelector('.btn.upgrade');
-        if (upgradeBtn) {
-            upgradeBtn.addEventListener('click', () => this.buyUpgrade());
-        }
-        
-        const autoBtn = document.querySelector('.btn.auto');
-        if (autoBtn) {
-            autoBtn.addEventListener('click', () => this.buyAutoClicker());
+    }
+    
+    createParticles(x, y) {
+        for (let i = 0; i < 5; i++) {
+            const particle = document.createElement('div');
+            particle.innerHTML = '💰';
+            particle.style.cssText = `
+                position: fixed;
+                left: ${x}px;
+                top: ${y}px;
+                font-size: 20px;
+                z-index: 999;
+                pointer-events: none;
+                animation: particle${i} 1s forwards;
+            `;
+            
+            // Динамический CSS для анимации
+            const style = document.createElement('style');
+            style.textContent = `
+                @keyframes particle${i} {
+                    0% { transform: translate(0, 0) scale(1); opacity: 1; }
+                    100% { 
+                        transform: translate(${Math.random() * 100 - 50}px, ${Math.random() * -100 - 50}px) scale(0); 
+                        opacity: 0; 
+                    }
+                }
+            `;
+            document.head.appendChild(style);
+            
+            document.body.appendChild(particle);
+            setTimeout(() => particle.remove(), 1000);
         }
     }
     
-    startAutoClickers() {
-        // Авто-кликеры каждые 3 секунды
+    startGameLoop() {
+        // Восстановление энергии
+        setInterval(() => {
+            if (this.energy < this.maxEnergy) {
+                this.energy = Math.min(this.maxEnergy, this.energy + this.energyRegen);
+                this.updateUI();
+            }
+        }, 1000);
+        
+        // Авто-кликеры
         setInterval(() => {
             if (this.autos > 0) {
-                const earned = this.autos * this.multiplier;
-                if (earned > 0) {
-                    this.coins += earned;
-                    this.updateDisplay();
-                    this.saveGame();
-                    
-                    // Случайный эффект
-                    if (Math.random() > 0.7) {
-                        const x = 50 + Math.random() * 50;
-                        const y = 50 + Math.random() * 50;
-                        this.createEffect(
-                            window.innerWidth * (x / 100),
-                            window.innerHeight * (y / 100),
-                            `🤖 +${earned}`,
-                            '#9b59b6'
-                        );
-                    }
+                const earned = this.autos * 0.5 * this.multiplier;
+                this.coins += earned;
+                this.updateUI();
+                this.saveGame();
+            }
+        }, 1000);
+        
+        // Сохранение каждые 30 секунд
+        setInterval(() => this.saveGame(), 30000);
+    }
+    
+    async loadUpgrades() {
+        const upgrades = [
+            {id: 'click_power', name: 'Усиление', desc: '+10% силы', cost: 50, icon: '💪'},
+            {id: 'max_energy', name: 'Энергия', desc: '+50 энергии', cost: 100, icon: '⚡'},
+            {id: 'energy_regen', name: 'Реген', desc: '+20% восстановления', cost: 200, icon: '🔄'},
+            {id: 'auto_clicker', name: 'Авто-кликер', desc: '+0.5 монет/сек', cost: 500, icon: '🤖'},
+            {id: 'multiplier', name: 'Множитель', desc: 'x1.5 доход', cost: 1000, icon: '🚀'}
+        ];
+        
+        const grid = document.getElementById('upgradesGrid');
+        if (!grid) return;
+        
+        grid.innerHTML = upgrades.map(up => `
+            <div class="upgrade-item" onclick="game.buyUpgrade('${up.id}', ${up.cost})">
+                <div class="upgrade-icon">${up.icon}</div>
+                <div class="upgrade-name">${up.name}</div>
+                <div class="upgrade-desc">${up.desc}</div>
+                <div class="upgrade-cost">${up.cost} 💰</div>
+            </div>
+        `).join('');
+    }
+    
+    async loadAchievements() {
+        try {
+            const res = await fetch(`/api/achievements/${this.userId}`);
+            this.achievements = await res.json();
+            
+            const grid = document.getElementById('achievementsGrid');
+            if (!grid) return;
+            
+            grid.innerHTML = this.achievements.map(ach => `
+                <div class="achievement-item ${ach.unlocked ? 'unlocked' : ''}">
+                    <div style="font-size: 2rem; margin-bottom: 10px;">🏆</div>
+                    <div style="font-weight: bold; margin-bottom: 5px;">${ach.name}</div>
+                    <div style="font-size: 0.9rem; opacity: 0.8; margin-bottom: 5px;">${ach.description}</div>
+                    <div style="font-size: 0.8rem;">
+                        Прогресс: ${ach.progress || 0}/${ach.target}
+                        ${ach.unlocked ? '<br>✅ Выполнено!' : ''}
+                    </div>
+                </div>
+            `).join('');
+        } catch (e) {
+            console.error('Ошибка загрузки достижений:', e);
+        }
+    }
+    
+    checkAchievements() {
+        // Проверяем выполненные достижения
+        this.achievements.forEach(ach => {
+            if (!ach.unlocked) {
+                let progress = 0;
+                
+                switch(ach.achievement_id) {
+                    case 'first_click':
+                        progress = this.totalClicks;
+                        break;
+                    case '100_coins':
+                        progress = this.coins;
+                        break;
+                    case 'max_energy':
+                        progress = this.maxEnergy;
+                        break;
+                }
+                
+                if (progress >= ach.target) {
+                    this.createEffect(`🏆 ${ach.name} разблокировано!`, '#ffd700');
                 }
             }
-        }, 3000);
+        });
+    }
+    
+    async updateLeaderboard(type = 'coins') {
+        try {
+            const res = await fetch(`/api/leaderboard/${type}`);
+            const players = await res.json();
+            
+            const content = document.getElementById('leaderboardContent');
+            if (!content) return;
+            
+            content.innerHTML = players.map((p, i) => `
+                <div class="leaderboard-item ${p.user_id === this.userId ? 'you' : ''}">
+                    <div class="rank ${i < 3 ? `rank-${i+1}` : ''}">${i + 1}</div>
+                    <div style="flex: 1;">
+                        <div style="font-weight: bold;">${p.username}</div>
+                        <div style="font-size: 0.9rem; opacity: 0.8;">
+                            ${type === 'coins' ? `💰 ${p.coins}` : ''}
+                            ${type === 'power' ? `💪 ${p.click_power}` : ''}
+                            ${type === 'prestige' ? `👑 ${p.prestige}` : ''}
+                            ${type === 'level' ? `⭐ ${p.level}` : ''}
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        } catch (e) {
+            console.error('Ошибка загрузки лидерборда:', e);
+        }
     }
 }
 
-// Создаем глобальный объект игры
-window.hamsterGame = new HamsterGame();
-
-// Запускаем игру когда DOM загружен
+// Инициализация игры
+let game;
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('DOM загружен, запускаем игру...');
-    window.hamsterGame.init();
+    game = new HamsterGame();
+    window.game = game;
     
-    // Добавляем CSS анимации
+    // CSS для анимаций
     const style = document.createElement('style');
     style.textContent = `
         @keyframes floatUp {
@@ -305,10 +457,27 @@ document.addEventListener('DOMContentLoaded', () => {
             100% { opacity: 0; transform: translate(-50%, -100px) scale(1.5); }
         }
         
-        @keyframes slideDown {
-            from { transform: translateX(-50%) translateY(-50px); opacity: 0; }
-            to { transform: translateX(-50%) translateY(0); opacity: 1; }
+        .dark-mode {
+            filter: brightness(0.9);
         }
     `;
     document.head.appendChild(style);
 });
+
+// Глобальные функции
+function showTab(tab) {
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById(tab).classList.add('active');
+    event.target.classList.add('active');
+    
+    if (tab === 'leaderboard') {
+        game.updateLeaderboard('coins');
+    }
+}
+
+function showLeaderboard(type) {
+    document.querySelectorAll('.lb-tab').forEach(b => b.classList.remove('active'));
+    event.target.classList.add('active');
+    game.updateLeaderboard(type);
+}
