@@ -6,7 +6,10 @@ services:
     plan: free
     buildCommand: |
       pip install -r requirements.txt
+      # Создаем папки если их нет
       mkdir -p static/css static/js static/images
+      # Копируем изображения если они есть локально
+      # (это для случая, когда у вас уже есть images в проекте)
     startCommand: python app.py
     envVars:
       - key: PORT
