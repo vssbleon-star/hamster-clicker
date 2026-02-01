@@ -1,0 +1,36 @@
+/* Основные стили */
+body {
+    background: linear-gradient(135deg, #0f172a, #1e293b);
+    color: white;
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 20px;
+    min-height: 100vh;
+}
+
+.container {
+    max-width: 500px;
+    margin: 0 auto;
+    text-align: center;
+}
+
+/* Хомяк */
+.hamster {
+    width: 150px;
+    height: 150px;
+    background: gold;
+    border-radius: 50%;
+    margin: 30px auto;
+    cursor: pointer;
+}
+
+/* Кнопки */
+.btn {
+    background: #3498db;
+    color: white;
+    border: none;
+    padding: 15px;
+    margin: 10px;
+    border-radius: 10px;
+    cursor: pointer;
+}
