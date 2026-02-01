@@ -1,7 +1,12 @@
 services:
   - type: web
-    name: hamster-clicker
+    name: hamster-empire
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: python app.py
+    envVars:
+      - key: PORT
+        value: 10000
+    healthCheckPath: /
+    autoDeploy: true
