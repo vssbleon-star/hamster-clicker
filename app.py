@@ -1,109 +1,122 @@
 from flask import Flask, jsonify, request, send_from_directory
 import os
 import sqlite3
-import math
 import random
-from datetime import datetime
+import math
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
+# Настройка путей
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, 'static')
-DB_FILE = os.path.join(BASE_DIR, 'galaxy_clicker.db')
+DB_FILE = os.path.join(BASE_DIR, 'coin_clicker.db')
 
 os.makedirs(os.path.join(STATIC_DIR, 'css'), exist_ok=True)
 os.makedirs(os.path.join(STATIC_DIR, 'js'), exist_ok=True)
 os.makedirs(os.path.join(STATIC_DIR, 'images'), exist_ok=True)
 
+# Инициализация базы данных
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
+    # Игроки
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS players (
         player_id TEXT PRIMARY KEY,
         username TEXT,
-        stardust DECIMAL(30,8) DEFAULT 100.0,
-        cosmic_energy DECIMAL(15,2) DEFAULT 100.0,
-        energy_capacity DECIMAL(15,2) DEFAULT 100.0,
-        energy_regen DECIMAL(10,4) DEFAULT 1.0,
-        click_power DECIMAL(20,4) DEFAULT 1.0,
-        auto_miners INTEGER DEFAULT 0,
-        multiplier DECIMAL(10,4) DEFAULT 1.0,
+        coins REAL DEFAULT 0,
+        gems INTEGER DEFAULT 10,
+        tokens INTEGER DEFAULT 0,
         total_clicks INTEGER DEFAULT 0,
-        galaxy_tier INTEGER DEFAULT 0,
-        star_level INTEGER DEFAULT 1,
-        experience DECIMAL(15,2) DEFAULT 0,
-        dark_matter DECIMAL(15,4) DEFAULT 0,
-        artifacts_found INTEGER DEFAULT 0,
-        achievements_unlocked INTEGER DEFAULT 0,
-        last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        total_earned REAL DEFAULT 0,
+        current_grade INTEGER DEFAULT 0,
+        grade_progress REAL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
     
+    # Улучшения
     cursor.execute('''
-    CREATE TABLE IF NOT EXISTS technologies (
+    CREATE TABLE IF NOT EXISTS upgrades (
         player_id TEXT,
-        tech_id TEXT,
+        upgrade_id TEXT,
         level INTEGER DEFAULT 0,
-        researched_at TIMESTAMP,
-        PRIMARY KEY (player_id, tech_id)
+        purchased_at TIMESTAMP,
+        PRIMARY KEY (player_id, upgrade_id)
     )
     ''')
     
+    # Автокликеры
     cursor.execute('''
-    CREATE TABLE IF NOT EXISTS artifacts (
+    CREATE TABLE IF NOT EXISTS autoclickers (
         player_id TEXT,
-        artifact_id TEXT,
-        discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        power_level INTEGER DEFAULT 1,
-        PRIMARY KEY (player_id, artifact_id)
+        clicker_id TEXT,
+        quantity INTEGER DEFAULT 0,
+        level INTEGER DEFAULT 1,
+        purchased_at TIMESTAMP,
+        PRIMARY KEY (player_id, clicker_id)
     )
     ''')
     
+    # Здания
     cursor.execute('''
-    CREATE TABLE IF NOT EXISTS missions (
+    CREATE TABLE IF NOT EXISTS buildings (
         player_id TEXT,
-        mission_id TEXT,
-        progress DECIMAL(10,2) DEFAULT 0,
-        completed BOOLEAN DEFAULT 0,
-        completed_at TIMESTAMP,
-        PRIMARY KEY (player_id, mission_id)
+        building_id TEXT,
+        quantity INTEGER DEFAULT 0,
+        level INTEGER DEFAULT 1,
+        purchased_at TIMESTAMP,
+        PRIMARY KEY (player_id, building_id)
     )
     ''')
     
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS cosmic_events (
-        player_id TEXT,
-        event_id TEXT,
-        event_type TEXT,
-        multiplier DECIMAL(10,4) DEFAULT 1.0,
-        ends_at TIMESTAMP,
-        PRIMARY KEY (player_id, event_id)
-    )
-    ''')
-    
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS leaderboards (
-        leaderboard_id TEXT PRIMARY KEY,
-        player_id TEXT,
-        score DECIMAL(30,8),
-        rank INTEGER,
-        category TEXT,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    ''')
-    
+    # Достижения
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS achievements (
         player_id TEXT,
         achievement_id TEXT,
-        tier INTEGER DEFAULT 0,
-        progress DECIMAL(15,2) DEFAULT 0,
+        progress REAL DEFAULT 0,
         completed BOOLEAN DEFAULT 0,
         completed_at TIMESTAMP,
         PRIMARY KEY (player_id, achievement_id)
+    )
+    ''')
+    
+    # Ежедневные награды
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS daily_rewards (
+        player_id TEXT,
+        day INTEGER DEFAULT 1,
+        claimed_at TIMESTAMP,
+        streak INTEGER DEFAULT 1,
+        PRIMARY KEY (player_id, day)
+    )
+    ''')
+    
+    # Лидерборд
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS leaderboard (
+        player_id TEXT PRIMARY KEY,
+        username TEXT,
+        total_score REAL DEFAULT 0,
+        coins_score REAL DEFAULT 0,
+        grade_score INTEGER DEFAULT 0,
+        achievements_score INTEGER DEFAULT 0,
+        last_update TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    
+    # Активные бусты
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS active_boosts (
+        player_id TEXT,
+        boost_id TEXT,
+        multiplier REAL DEFAULT 1.0,
+        ends_at TIMESTAMP,
+        PRIMARY KEY (player_id, boost_id)
     )
     ''')
     
@@ -117,218 +130,290 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn
 
-@app.route('/')
-def index():
-    return '''
+# HTML страница
+HTML_GAME = '''
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🌟 Cosmic Clicker</title>
+    <title>💰 Coin Clicker Master</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@300;400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-    <div class="universe">
-        <div class="stars"></div>
-        <div class="twinkling"></div>
-        <div class="nebula"></div>
-    </div>
-    
     <div class="container">
-        <div class="header">
-            <div class="player-info">
-                <h1><i class="fas fa-star"></i> COSMIC CLICKER</h1>
-                <div class="player-stats">
-                    <div class="galaxy-badge">Галактика: <span id="galaxyTier">0</span></div>
-                    <div class="star-level">Звезда: <span id="starLevel">1</span></div>
-                </div>
-            </div>
-            <div class="event-indicator" id="eventIndicator"></div>
-        </div>
-
-        <div class="resource-panel">
-            <div class="resource-card stardust">
-                <div class="resource-icon"><i class="fas fa-gem"></i></div>
-                <div class="resource-value" id="stardust">100.00</div>
-                <div class="resource-label">ЗВЕЗДНАЯ ПЫЛЬ</div>
-                <div class="resource-per-second" id="stardustPerSecond">0.00/сек</div>
-            </div>
-            
-            <div class="resource-card energy">
-                <div class="resource-icon"><i class="fas fa-bolt"></i></div>
-                <div class="resource-value" id="energy">100.0/100.0</div>
-                <div class="resource-label">КОСМИЧЕСКАЯ ЭНЕРГИЯ</div>
-                <div class="energy-bar">
-                    <div class="energy-fill" id="energyFill"></div>
-                </div>
-            </div>
-            
-            <div class="resource-card dark-matter">
-                <div class="resource-icon"><i class="fas fa-moon"></i></div>
-                <div class="resource-value" id="darkMatter">0.0000</div>
-                <div class="resource-label">ТЕМНАЯ МАТЕРИЯ</div>
-            </div>
-        </div>
-
-        <div class="progress-section">
-            <div class="star-progress">
-                <div class="progress-info">
-                    <i class="fas fa-rocket"></i> Прогресс звезды
-                    <span class="xp-text">Опыт: <span id="xp">0</span>/<span id="xpNeeded">100</span></span>
-                </div>
-                <div class="progress-bar">
-                    <div class="progress-fill" id="xpFill"></div>
-                    <div class="progress-milestones"></div>
-                </div>
-            </div>
-            
-            <div class="mission-tracker" id="missionTracker">
-                <div class="mission-title">Миссия: Начало пути</div>
-                <div class="mission-progress">
-                    <div class="mission-fill" style="width: 10%"></div>
-                </div>
-            </div>
-        </div>
-
-        <div class="clicker-section">
-            <div class="cosmic-center">
-                <div class="pulsar-effect"></div>
-                <div class="quantum-ring"></div>
-                <div class="star-core" id="starCore">
-                    <div class="core-inner">
-                        <div class="core-glow"></div>
-                        <div class="core-particles"></div>
-                        <img src="/static/images/star.jpg" alt="Звезда" class="core-image">
+        <!-- Хедер -->
+        <header class="main-header">
+            <div class="header-top">
+                <h1><i class="fas fa-coins"></i> COIN CLICKER MASTER</h1>
+                <div class="player-grade">
+                    <div class="grade-badge" id="gradeBadge">
+                        <span class="grade-icon">🥉</span>
+                        <span class="grade-name">BRONZE</span>
+                    </div>
+                    <div class="grade-progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="gradeProgress"></div>
+                        </div>
+                        <div class="progress-text">Прогресс: <span id="gradePercent">0%</span></div>
                     </div>
                 </div>
-                <div class="click-stats">
-                    <div class="click-power">+<span id="clickPower">1.00</span> звёздной пыли</div>
-                    <div class="energy-cost">-<span id="energyCost">1.00</span> энергии</div>
-                    <div class="critical-chance">Шанс крита: <span id="critChance">5%</span></div>
-                </div>
             </div>
             
-            <div class="auto-stats">
-                <i class="fas fa-robot"></i> Авто-добыча: 
-                <span id="autoIncome">0.00</span>/сек
-                <span class="miner-count" id="minerCount">(0 майнеров)</span>
-            </div>
-        </div>
-
-        <div class="tech-tree">
-            <h3><i class="fas fa-atom"></i> ТЕХНОЛОГИИ</h3>
-            <div class="tech-branches">
-                <div class="tech-branch" data-branch="energy">
-                    <div class="branch-icon"><i class="fas fa-bolt"></i></div>
-                    <div class="branch-name">Энергетика</div>
-                </div>
-                <div class="tech-branch" data-branch="mining">
-                    <div class="branch-icon"><i class="fas fa-mountain"></i></div>
-                    <div class="branch-name">Добыча</div>
-                </div>
-                <div class="tech-branch" data-branch="multi">
-                    <div class="branch-icon"><i class="fas fa-expand-alt"></i></div>
-                    <div class="branch-name">Множители</div>
-                </div>
-                <div class="tech-branch" data-branch="artifacts">
-                    <div class="branch-icon"><i class="fas fa-magic"></i></div>
-                    <div class="branch-name">Артефакты</div>
-                </div>
-            </div>
-            <div class="tech-nodes" id="techNodes"></div>
-        </div>
-
-        <div class="game-tabs">
-            <div class="tab-nav">
-                <button class="tab-btn active" data-tab="upgrades"><i class="fas fa-arrow-up"></i> Улучшения</button>
-                <button class="tab-btn" data-tab="artifacts"><i class="fas fa-magic"></i> Артефакты</button>
-                <button class="tab-btn" data-tab="missions"><i class="fas fa-tasks"></i> Миссии</button>
-                <button class="tab-btn" data-tab="leaderboard"><i class="fas fa-trophy"></i> Рейтинг</button>
-                <button class="tab-btn" data-tab="galaxy"><i class="fas fa-globe"></i> Галактика</button>
-            </div>
-            
-            <div class="tab-content active" id="upgrades">
-                <div class="upgrades-grid" id="upgradesGrid"></div>
-            </div>
-            
-            <div class="tab-content" id="artifacts">
-                <div class="artifacts-collection" id="artifactsGrid"></div>
-            </div>
-            
-            <div class="tab-content" id="missions">
-                <div class="missions-list" id="missionsList"></div>
-            </div>
-            
-            <div class="tab-content" id="leaderboard">
-                <div class="leaderboard-filters">
-                    <button class="filter-btn active" data-filter="stardust"><i class="fas fa-gem"></i> Богатство</button>
-                    <button class="filter-btn" data-filter="power"><i class="fas fa-bolt"></i> Мощность</button>
-                    <button class="filter-btn" data-filter="galaxy"><i class="fas fa-globe"></i> Галактики</button>
-                    <button class="filter-btn" data-filter="artifacts"><i class="fas fa-magic"></i> Артефакты</button>
-                </div>
-                <div class="leaderboard-table" id="leaderboardTable"></div>
-            </div>
-            
-            <div class="tab-content" id="galaxy">
-                <div class="galaxy-map">
-                    <div class="galaxy-info">
-                        <h4><i class="fas fa-infinity"></i> СИСТЕМА ГАЛАКТИК</h4>
-                        <p>Прокачивайте звезду и переходите в новые галактики!</p>
+            <div class="header-stats">
+                <div class="stat-item coins-stat">
+                    <div class="stat-icon">💰</div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="coinsValue">0</div>
+                        <div class="stat-label">COINS</div>
                     </div>
-                    <div class="galaxy-stats">
-                        <div>Текущая галактика: <span id="currentGalaxy">Млечный Путь</span></div>
-                        <div>Следующая галактика: <span id="nextGalaxy">Андромеда</span></div>
-                        <div>Требуется звёздной пыли: <span id="galaxyRequirement">1,000,000</span></div>
+                </div>
+                
+                <div class="stat-item gems-stat">
+                    <div class="stat-icon">💎</div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="gemsValue">10</div>
+                        <div class="stat-label">GEMS</div>
                     </div>
-                    <button class="galaxy-btn" id="ascendGalaxyBtn"><i class="fas fa-rocket"></i> АСКЕНД В ГАЛАКТИКУ</button>
+                </div>
+                
+                <div class="stat-item tokens-stat">
+                    <div class="stat-icon">🪙</div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="tokensValue">0</div>
+                        <div class="stat-label">TOKENS</div>
+                    </div>
+                </div>
+                
+                <div class="stat-item cps-stat">
+                    <div class="stat-icon">⚡</div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="cpsValue">0</div>
+                        <div class="stat-label">В СЕКУНДУ</div>
+                    </div>
                 </div>
             </div>
-        </div>
+        </header>
 
-        <div class="event-banner" id="eventBanner">
-            <div class="event-content">
-                <i class="fas fa-meteor"></i>
-                <span class="event-text">Космический шторм: +50% к добыче!</span>
-                <span class="event-timer" id="eventTimer">15:00</span>
+        <!-- Главный кликер -->
+        <section class="clicker-section">
+            <div class="clicker-container">
+                <div class="coin-glow"></div>
+                <div class="coin-shine"></div>
+                <div class="main-coin" id="mainCoin">
+                    <div class="coin-face">
+                        <div class="coin-design">
+                            <div class="coin-value">$</div>
+                            <div class="coin-stars">✦✦✦</div>
+                        </div>
+                    </div>
+                    <div class="coin-sparkles">
+                        <div class="sparkle"></div>
+                        <div class="sparkle"></div>
+                        <div class="sparkle"></div>
+                    </div>
+                </div>
+                <div class="clicker-stats">
+                    <div class="click-power">
+                        <i class="fas fa-hand-point-up"></i> +<span id="clickPower">1.0</span> за клик
+                    </div>
+                    <div class="critical-info">
+                        <i class="fas fa-fire"></i> Крит: <span id="critChance">5%</span> (x<span id="critMultiplier">2.0</span>)
+                    </div>
+                    <div class="multi-info">
+                        <i class="fas fa-expand-alt"></i> Множитель: x<span id="totalMultiplier">1.0</span>
+                    </div>
+                </div>
             </div>
-        </div>
+        </section>
+
+        <!-- Быстрые улучшения -->
+        <section class="quick-upgrades">
+            <h3><i class="fas fa-bolt"></i> БЫСТРЫЕ УЛУЧШЕНИЯ</h3>
+            <div class="quick-grid">
+                <div class="quick-item" onclick="buyUpgrade('click_power')">
+                    <div class="quick-icon">💪</div>
+                    <div class="quick-name">Усилитель</div>
+                    <div class="quick-cost">50 🪙</div>
+                </div>
+                <div class="quick-item" onclick="buyAutoclicker('basic')">
+                    <div class="quick-icon">🤖</div>
+                    <div class="quick-name">Автокликер</div>
+                    <div class="quick-cost">100 🪙</div>
+                </div>
+                <div class="quick-item" onclick="buyMultiplier('x2')">
+                    <div class="quick-icon">🌀</div>
+                    <div class="quick-name">x2 Множитель</div>
+                    <div class="quick-cost">500 🪙</div>
+                </div>
+                <div class="quick-item" onclick="buyCritBoost()">
+                    <div class="quick-icon">💥</div>
+                    <div class="quick-name">Крит. Удар</div>
+                    <div class="quick-cost">200 🪙</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Панель вкладок -->
+        <section class="tabs-section">
+            <div class="tabs-header">
+                <button class="tab-btn active" data-tab="autoclickers">
+                    <i class="fas fa-robot"></i> Автокликеры
+                </button>
+                <button class="tab-btn" data-tab="upgrades">
+                    <i class="fas fa-arrow-up"></i> Улучшения
+                </button>
+                <button class="tab-btn" data-tab="buildings">
+                    <i class="fas fa-city"></i> Здания
+                </button>
+                <button class="tab-btn" data-tab="achievements">
+                    <i class="fas fa-trophy"></i> Достижения
+                </button>
+                <button class="tab-btn" data-tab="leaderboard">
+                    <i class="fas fa-crown"></i> Лидеры
+                </button>
+            </div>
+            
+            <div class="tabs-content">
+                <!-- Автокликеры -->
+                <div class="tab-pane active" id="autoclickers">
+                    <div class="clickers-grid" id="clickersGrid"></div>
+                </div>
+                
+                <!-- Улучшения -->
+                <div class="tab-pane" id="upgrades">
+                    <div class="upgrades-category">
+                        <h4><i class="fas fa-hand-rock"></i> Улучшения клика</h4>
+                        <div class="upgrades-list" id="clickUpgrades"></div>
+                    </div>
+                    <div class="upgrades-category">
+                        <h4><i class="fas fa-expand-arrows-alt"></i> Множители</h4>
+                        <div class="upgrades-list" id="multiplierUpgrades"></div>
+                    </div>
+                </div>
+                
+                <!-- Здания -->
+                <div class="tab-pane" id="buildings">
+                    <div class="buildings-grid" id="buildingsGrid"></div>
+                </div>
+                
+                <!-- Достижения -->
+                <div class="tab-pane" id="achievements">
+                    <div class="achievements-grid" id="achievementsGrid"></div>
+                </div>
+                
+                <!-- Лидерборд -->
+                <div class="tab-pane" id="leaderboard">
+                    <div class="leaderboard-filters">
+                        <button class="filter-btn active" data-filter="total">
+                            <i class="fas fa-trophy"></i> Общий рейтинг
+                        </button>
+                        <button class="filter-btn" data-filter="coins">
+                            <i class="fas fa-coins"></i> Богатство
+                        </button>
+                        <button class="filter-btn" data-filter="grade">
+                            <i class="fas fa-star"></i> Уровень
+                        </button>
+                        <button class="filter-btn" data-filter="clicks">
+                            <i class="fas fa-mouse"></i> Клики
+                        </button>
+                    </div>
+                    <div class="leaderboard-content" id="leaderboardContent"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Дневные награды и бусты -->
+        <section class="bonus-section">
+            <div class="daily-rewards">
+                <h4><i class="fas fa-calendar-day"></i> ЕЖЕДНЕВНЫЕ НАГРАДЫ</h4>
+                <div class="rewards-track" id="rewardsTrack"></div>
+                <button class="claim-btn" id="claimDailyBtn">
+                    <i class="fas fa-gift"></i> Получить награду
+                </button>
+            </div>
+            
+            <div class="active-boosts">
+                <h4><i class="fas fa-bolt"></i> АКТИВНЫЕ БУСТЫ</h4>
+                <div class="boosts-list" id="activeBoosts"></div>
+            </div>
+        </section>
+
+        <!-- Информация о грейдах -->
+        <section class="grades-info">
+            <h3><i class="fas fa-layer-group"></i> СИСТЕМА ГРЕЙДОВ</h3>
+            <div class="grades-track" id="gradesTrack"></div>
+            <div class="grade-benefits">
+                <h4>Текущие бонусы:</h4>
+                <ul id="currentBenefits"></ul>
+            </div>
+        </section>
+
+        <!-- Футер -->
+        <footer class="game-footer">
+            <div class="footer-stats">
+                <div class="total-clicks">
+                    <i class="fas fa-mouse-pointer"></i> Всего кликов: <span id="totalClicks">0</span>
+                </div>
+                <div class="total-earned">
+                    <i class="fas fa-chart-line"></i> Заработано: <span id="totalEarned">0</span>
+                </div>
+                <div class="play-time">
+                    <i class="fas fa-clock"></i> Время игры: <span id="playTime">0</span>
+                </div>
+            </div>
+            <div class="version-info">
+                Coin Clicker Master v1.0 | <span id="onlineCount">1</span> игроков онлайн
+            </div>
+        </footer>
     </div>
 
     <script src="/static/js/game.js"></script>
     <script>
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const tab = btn.dataset.tab;
-                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-                document.getElementById(tab).classList.add('active');
-                btn.classList.add('active');
-                if(tab === 'leaderboard') updateLeaderboard('stardust');
+        document.addEventListener('DOMContentLoaded', () => {
+            // Инициализация вкладок
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const tabId = this.dataset.tab;
+                    
+                    // Убираем активный класс у всех кнопок и панелей
+                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+                    
+                    // Добавляем активный класс
+                    this.classList.add('active');
+                    document.getElementById(tabId).classList.add('active');
+                    
+                    // Обновляем контент при переключении
+                    if(tabId === 'leaderboard') {
+                        game.updateLeaderboard('total');
+                    }
+                });
             });
-        });
-        
-        document.querySelectorAll('.filter-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                updateLeaderboard(btn.dataset.filter);
+            
+            // Фильтры лидерборда
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                    game.updateLeaderboard(this.dataset.filter);
+                });
             });
-        });
-        
-        document.querySelectorAll('.tech-branch').forEach(branch => {
-            branch.addEventListener('click', () => {
-                const branchId = branch.dataset.branch;
-                loadTechNodes(branchId);
-            });
+            
+            // Инициализация игры
+            game.init();
         });
     </script>
 </body>
 </html>
 '''
+
+@app.route('/')
+def index():
+    return HTML_GAME
 
 @app.route('/api/player/<player_id>')
 def get_player(player_id):
@@ -338,119 +423,350 @@ def get_player(player_id):
     if player:
         data = dict(player)
         
-        techs = conn.execute('SELECT tech_id, level FROM technologies WHERE player_id = ?', (player_id,)).fetchall()
-        data['technologies'] = {t['tech_id']: t['level'] for t in techs}
+        # Получаем улучшения
+        upgrades = conn.execute('SELECT upgrade_id, level FROM upgrades WHERE player_id = ?', (player_id,)).fetchall()
+        data['upgrades'] = {u['upgrade_id']: u['level'] for u in upgrades}
         
-        artifacts = conn.execute('SELECT artifact_id, power_level FROM artifacts WHERE player_id = ?', (player_id,)).fetchall()
-        data['artifacts'] = {a['artifact_id']: a['power_level'] for a in artifacts}
+        # Получаем автокликеры
+        autoclickers = conn.execute('SELECT clicker_id, quantity, level FROM autoclickers WHERE player_id = ?', (player_id,)).fetchall()
+        data['autoclickers'] = {a['clicker_id']: {'quantity': a['quantity'], 'level': a['level']} for a in autoclickers}
         
-        events = conn.execute('SELECT event_type, multiplier, ends_at FROM cosmic_events WHERE player_id = ? AND ends_at > CURRENT_TIMESTAMP', (player_id,)).fetchall()
-        data['active_events'] = [dict(e) for e in events]
+        # Получаем здания
+        buildings = conn.execute('SELECT building_id, quantity, level FROM buildings WHERE player_id = ?', (player_id,)).fetchall()
+        data['buildings'] = {b['building_id']: {'quantity': b['quantity'], 'level': b['level']} for b in buildings}
+        
+        # Получаем достижения
+        achievements = conn.execute('SELECT achievement_id, progress, completed FROM achievements WHERE player_id = ?', (player_id,)).fetchall()
+        data['achievements'] = {a['achievement_id']: {'progress': a['progress'], 'completed': a['completed']} for a in achievements}
+        
+        # Получаем активные бусты
+        boosts = conn.execute('SELECT boost_id, multiplier FROM active_boosts WHERE player_id = ? AND ends_at > CURRENT_TIMESTAMP', (player_id,)).fetchall()
+        data['active_boosts'] = {b['boost_id']: b['multiplier'] for b in boosts}
         
         conn.close()
         return jsonify(data)
     
+    # Создаем нового игрока
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO players (player_id, username, coins, gems, tokens)
+        VALUES (?, ?, 0, 10, 0)
+    ''', (player_id, 'Игрок'))
+    
+    # Создаем базовые достижения
+    base_achievements = [
+        'first_click', 'first_100_coins', 'first_upgrade',
+        'first_autoclicker', 'grade_1', 'daily_streak_3'
+    ]
+    for ach_id in base_achievements:
+        cursor.execute('INSERT OR IGNORE INTO achievements (player_id, achievement_id) VALUES (?, ?)', (player_id, ach_id))
+    
+    conn.commit()
     conn.close()
+    
     return jsonify({
-        'stardust': 100.0,
-        'cosmic_energy': 100.0,
-        'energy_capacity': 100.0,
-        'energy_regen': 1.0,
-        'click_power': 1.0,
-        'auto_miners': 0,
-        'multiplier': 1.0,
-        'galaxy_tier': 0,
-        'star_level': 1,
-        'experience': 0,
-        'dark_matter': 0,
-        'artifacts_found': 0
+        'coins': 0,
+        'gems': 10,
+        'tokens': 0,
+        'total_clicks': 0,
+        'total_earned': 0,
+        'current_grade': 0,
+        'grade_progress': 0,
+        'upgrades': {},
+        'autoclickers': {},
+        'buildings': {},
+        'achievements': {},
+        'active_boosts': {}
     })
 
 @app.route('/api/save', methods=['POST'])
 def save_game():
     data = request.json
     player_id = data['player_id']
-    username = data.get('username', 'Космический Исследователь')
+    username = data.get('username', 'Игрок')
     
     conn = get_db()
     cursor = conn.cursor()
     
+    # Обновляем данные игрока
     cursor.execute('''
-        INSERT OR REPLACE INTO players 
-        (player_id, username, stardust, cosmic_energy, energy_capacity, energy_regen, 
-         click_power, auto_miners, multiplier, total_clicks, galaxy_tier, star_level, 
-         experience, dark_matter, artifacts_found, last_active)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        UPDATE players SET
+            username = ?,
+            coins = ?,
+            gems = ?,
+            tokens = ?,
+            total_clicks = ?,
+            total_earned = ?,
+            current_grade = ?,
+            grade_progress = ?,
+            last_active = CURRENT_TIMESTAMP
+        WHERE player_id = ?
     ''', (
-        player_id, username,
-        data['stardust'], data['cosmic_energy'], data['energy_capacity'], data['energy_regen'],
-        data['click_power'], data['auto_miners'], data['multiplier'], data['total_clicks'],
-        data['galaxy_tier'], data['star_level'], data['experience'], data['dark_matter'],
-        data.get('artifacts_found', 0)
+        username,
+        data['coins'],
+        data['gems'],
+        data['tokens'],
+        data['total_clicks'],
+        data['total_earned'],
+        data['current_grade'],
+        data['grade_progress'],
+        player_id
     ))
+    
+    # Обновляем лидерборд
+    total_score = (
+        data['coins'] / 1000 + 
+        data['current_grade'] * 1000 + 
+        data.get('achievements_completed', 0) * 100
+    )
+    
+    cursor.execute('''
+        INSERT OR REPLACE INTO leaderboard 
+        (player_id, username, total_score, coins_score, grade_score, achievements_score)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (
+        player_id,
+        username,
+        total_score,
+        data['coins'],
+        data['current_grade'],
+        data.get('achievements_completed', 0)
+    ))
+    
+    # Обновляем достижения
+    for ach_id, ach_data in data.get('achievements', {}).items():
+        cursor.execute('''
+            UPDATE achievements SET 
+                progress = ?,
+                completed = ?
+            WHERE player_id = ? AND achievement_id = ?
+        ''', (ach_data.get('progress', 0), ach_data.get('completed', 0), player_id, ach_id))
     
     conn.commit()
     conn.close()
     
-    update_leaderboards(player_id)
-    
     return jsonify({'success': True})
 
-@app.route('/api/upgrade', methods=['POST'])
-def upgrade_tech():
+@app.route('/api/buy_upgrade', methods=['POST'])
+def buy_upgrade():
     data = request.json
     player_id = data['player_id']
-    tech_id = data['tech_id']
+    upgrade_id = data['upgrade_id']
     cost = data['cost']
+    upgrade_type = data.get('type', 'click')
     
     conn = get_db()
     cursor = conn.cursor()
     
-    player = cursor.execute('SELECT stardust FROM players WHERE player_id = ?', (player_id,)).fetchone()
+    # Проверяем баланс
+    player = cursor.execute('SELECT coins, gems, tokens FROM players WHERE player_id = ?', (player_id,)).fetchone()
     
-    if player and player['stardust'] >= cost:
-        cursor.execute('''
-            INSERT OR REPLACE INTO technologies (player_id, tech_id, level, researched_at)
-            VALUES (?, ?, COALESCE((SELECT level + 1 FROM technologies WHERE player_id = ? AND tech_id = ?), 1), CURRENT_TIMESTAMP)
-        ''', (player_id, tech_id, player_id, tech_id))
-        
-        cursor.execute('UPDATE players SET stardust = stardust - ? WHERE player_id = ?', (cost, player_id))
-        
-        conn.commit()
+    if not player:
         conn.close()
-        
-        return jsonify({'success': True, 'new_balance': player['stardust'] - cost})
+        return jsonify({'success': False, 'error': 'Игрок не найден'})
     
+    # Проверяем валюту
+    currency_needed = {'coins': player['coins'], 'gems': player['gems'], 'tokens': player['tokens']}
+    
+    if 'cost_coins' in data and currency_needed['coins'] < data['cost_coins']:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Недостаточно монет'})
+    
+    if 'cost_gems' in data and currency_needed['gems'] < data['cost_gems']:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Недостаточно самоцветов'})
+    
+    if 'cost_tokens' in data and currency_needed['tokens'] < data['cost_tokens']:
+        conn.close()
+        return jsonify({'success': False, 'error': 'Недостаточно жетонов'})
+    
+    # Списание валюты
+    if 'cost_coins' in data:
+        cursor.execute('UPDATE players SET coins = coins - ? WHERE player_id = ?', (data['cost_coins'], player_id))
+    
+    if 'cost_gems' in data:
+        cursor.execute('UPDATE players SET gems = gems - ? WHERE player_id = ?', (data['cost_gems'], player_id))
+    
+    if 'cost_tokens' in data:
+        cursor.execute('UPDATE players SET tokens = tokens - ? WHERE player_id = ?', (data['cost_tokens'], player_id))
+    
+    # Добавляем/обновляем улучшение
+    if upgrade_type == 'click':
+        cursor.execute('''
+            INSERT OR REPLACE INTO upgrades (player_id, upgrade_id, level, purchased_at)
+            VALUES (?, ?, COALESCE((SELECT level + 1 FROM upgrades WHERE player_id = ? AND upgrade_id = ?), 1), CURRENT_TIMESTAMP)
+        ''', (player_id, upgrade_id, player_id, upgrade_id))
+    
+    elif upgrade_type == 'autoclicker':
+        cursor.execute('''
+            INSERT OR REPLACE INTO autoclickers (player_id, clicker_id, quantity, purchased_at)
+            VALUES (?, ?, COALESCE((SELECT quantity + 1 FROM autoclickers WHERE player_id = ? AND clicker_id = ?), 1), CURRENT_TIMESTAMP)
+        ''', (player_id, upgrade_id, player_id, upgrade_id))
+    
+    elif upgrade_type == 'building':
+        cursor.execute('''
+            INSERT OR REPLACE INTO buildings (player_id, building_id, quantity, purchased_at)
+            VALUES (?, ?, COALESCE((SELECT quantity + 1 FROM buildings WHERE player_id = ? AND building_id = ?), 1), CURRENT_TIMESTAMP)
+        ''', (player_id, upgrade_id, player_id, upgrade_id))
+    
+    conn.commit()
+    
+    # Получаем обновленные данные
+    player = cursor.execute('SELECT coins, gems, tokens FROM players WHERE player_id = ?', (player_id,)).fetchone()
     conn.close()
-    return jsonify({'success': False, 'error': 'Недостаточно звёздной пыли'})
+    
+    return jsonify({
+        'success': True,
+        'new_balance': {
+            'coins': player['coins'],
+            'gems': player['gems'],
+            'tokens': player['tokens']
+        }
+    })
+
+@app.route('/api/activate_boost', methods=['POST'])
+def activate_boost():
+    data = request.json
+    player_id = data['player_id']
+    boost_id = data['boost_id']
+    duration = data.get('duration', 300)  # 5 минут по умолчанию
+    multiplier = data.get('multiplier', 2.0)
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    # Проверяем баланс
+    if data.get('cost_gems'):
+        player = cursor.execute('SELECT gems FROM players WHERE player_id = ?', (player_id,)).fetchone()
+        if player and player['gems'] >= data['cost_gems']:
+            cursor.execute('UPDATE players SET gems = gems - ? WHERE player_id = ?', (data['cost_gems'], player_id))
+        else:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Недостаточно самоцветов'})
+    
+    # Добавляем буст
+    ends_at = datetime.now() + timedelta(seconds=duration)
+    cursor.execute('''
+        INSERT OR REPLACE INTO active_boosts (player_id, boost_id, multiplier, ends_at)
+        VALUES (?, ?, ?, ?)
+    ''', (player_id, boost_id, multiplier, ends_at.isoformat()))
+    
+    conn.commit()
+    conn.close()
+    
+    return jsonify({'success': True, 'ends_at': ends_at.isoformat()})
+
+@app.route('/api/claim_daily', methods=['POST'])
+def claim_daily():
+    data = request.json
+    player_id = data['player_id']
+    
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    # Получаем информацию о ежедневных наградах
+    daily = cursor.execute('SELECT * FROM daily_rewards WHERE player_id = ? ORDER BY day DESC LIMIT 1', (player_id,)).fetchone()
+    
+    now = datetime.now()
+    day_reward = 1
+    streak = 1
+    
+    if daily:
+        last_claim = datetime.fromisoformat(daily['claimed_at'])
+        # Проверяем, прошел ли день
+        if (now - last_claim).days >= 1:
+            if (now - last_claim).days == 1:
+                streak = daily['streak'] + 1
+            else:
+                streak = 1
+            day_reward = daily['day'] + 1 if daily['day'] < 7 else 1
+        else:
+            conn.close()
+            return jsonify({'success': False, 'error': 'Уже получали сегодня'})
+    else:
+        day_reward = 1
+    
+    # Выдаем награду
+    rewards = [
+        {'coins': 100, 'gems': 1},
+        {'coins': 250, 'gems': 2},
+        {'coins': 500, 'gems': 3},
+        {'coins': 1000, 'gems': 5},
+        {'coins': 2500, 'gems': 8},
+        {'coins': 5000, 'gems': 13},
+        {'coins': 10000, 'gems': 21, 'tokens': 1}
+    ]
+    
+    reward = rewards[min(day_reward - 1, 6)]
+    
+    # Умножаем за серию
+    if streak > 1:
+        reward['coins'] = int(reward['coins'] * (1 + streak * 0.1))
+        reward['gems'] = int(reward['gems'] * (1 + streak * 0.1))
+    
+    # Начисляем награду
+    cursor.execute('UPDATE players SET coins = coins + ?, gems = gems + ?, tokens = tokens + ? WHERE player_id = ?',
+                  (reward['coins'], reward.get('gems', 0), reward.get('tokens', 0), player_id))
+    
+    # Записываем факт получения
+    cursor.execute('''
+        INSERT INTO daily_rewards (player_id, day, claimed_at, streak)
+        VALUES (?, ?, ?, ?)
+    ''', (player_id, day_reward, now.isoformat(), streak))
+    
+    conn.commit()
+    conn.close()
+    
+    return jsonify({
+        'success': True,
+        'reward': reward,
+        'day': day_reward,
+        'streak': streak
+    })
 
 @app.route('/api/leaderboard/<category>')
 def get_leaderboard(category):
     conn = get_db()
     
-    if category == 'stardust':
+    if category == 'total':
         query = '''
-            SELECT player_id, username, stardust, star_level, galaxy_tier, 
-                   RANK() OVER (ORDER BY stardust DESC) as rank
-            FROM players ORDER BY stardust DESC LIMIT 100
+            SELECT l.*, p.total_clicks 
+            FROM leaderboard l
+            LEFT JOIN players p ON l.player_id = p.player_id
+            ORDER BY l.total_score DESC 
+            LIMIT 100
         '''
-    elif category == 'power':
+    elif category == 'coins':
         query = '''
-            SELECT player_id, username, click_power, star_level, galaxy_tier,
-                   RANK() OVER (ORDER BY click_power DESC) as rank
-            FROM players ORDER BY click_power DESC LIMIT 100
+            SELECT l.*, p.total_clicks 
+            FROM leaderboard l
+            LEFT JOIN players p ON l.player_id = p.player_id
+            ORDER BY l.coins_score DESC 
+            LIMIT 100
         '''
-    elif category == 'galaxy':
+    elif category == 'grade':
         query = '''
-            SELECT player_id, username, galaxy_tier, star_level, stardust,
-                   RANK() OVER (ORDER BY galaxy_tier DESC, star_level DESC) as rank
-            FROM players ORDER BY galaxy_tier DESC, star_level DESC LIMIT 100
+            SELECT l.*, p.total_clicks 
+            FROM leaderboard l
+            LEFT JOIN players p ON l.player_id = p.player_id
+            ORDER BY l.grade_score DESC, l.total_score DESC 
+            LIMIT 100
+        '''
+    elif category == 'clicks':
+        query = '''
+            SELECT l.*, p.total_clicks 
+            FROM leaderboard l
+            LEFT JOIN players p ON l.player_id = p.player_id
+            ORDER BY p.total_clicks DESC 
+            LIMIT 100
         '''
     else:
         query = '''
-            SELECT player_id, username, artifacts_found, star_level, galaxy_tier,
-                   RANK() OVER (ORDER BY artifacts_found DESC) as rank
-            FROM players ORDER BY artifacts_found DESC LIMIT 100
+            SELECT l.*, p.total_clicks 
+            FROM leaderboard l
+            LEFT JOIN players p ON l.player_id = p.player_id
+            ORDER BY l.total_score DESC 
+            LIMIT 100
         '''
     
     players = conn.execute(query).fetchall()
@@ -458,125 +774,8 @@ def get_leaderboard(category):
     
     return jsonify([dict(p) for p in players])
 
-@app.route('/api/missions/<player_id>')
-def get_missions(player_id):
-    missions = [
-        {'id': 'first_click', 'name': 'Первый шаг', 'desc': 'Сделать 10 кликов', 'target': 10, 'reward': 100},
-        {'id': 'stardust_100', 'name': 'Богатство', 'desc': 'Накопить 1000 звёздной пыли', 'target': 1000, 'reward': 500},
-        {'id': 'energy_500', 'name': 'Энергетик', 'desc': 'Увеличить энергию до 500', 'target': 500, 'reward': 1000},
-        {'id': 'miner_5', 'name': 'Автоматизация', 'desc': 'Купить 5 авто-майнеров', 'target': 5, 'reward': 2000},
-        {'id': 'artifact_1', 'name': 'Искатель', 'desc': 'Найти первый артефакт', 'target': 1, 'reward': 5000},
-    ]
-    
-    return jsonify(missions)
-
-@app.route('/api/artifacts/discover', methods=['POST'])
-def discover_artifact():
-    data = request.json
-    player_id = data['player_id']
-    
-    artifacts = [
-        {'id': 'crystal_heart', 'name': 'Кристальное Сердце', 'power': 1.5, 'rarity': 'common'},
-        {'id': 'quantum_core', 'name': 'Квантовое Ядро', 'power': 2.0, 'rarity': 'rare'},
-        {'id': 'stellar_shard', 'name': 'Осколок Звезды', 'power': 3.0, 'rarity': 'epic'},
-        {'id': 'black_hole_fragment', 'name': 'Фрагмент Чёрной Дыры', 'power': 5.0, 'rarity': 'legendary'},
-    ]
-    
-    artifact = random.choice(artifacts)
-    
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        INSERT OR IGNORE INTO artifacts (player_id, artifact_id, power_level)
-        VALUES (?, ?, ?)
-    ''', (player_id, artifact['id'], artifact['power']))
-    
-    cursor.execute('UPDATE players SET artifacts_found = artifacts_found + 1 WHERE player_id = ?', (player_id,))
-    
-    conn.commit()
-    conn.close()
-    
-    return jsonify({'success': True, 'artifact': artifact})
-
-@app.route('/api/ascend', methods=['POST'])
-def ascend_galaxy():
-    data = request.json
-    player_id = data['player_id']
-    
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    player = cursor.execute('SELECT stardust, galaxy_tier, star_level FROM players WHERE player_id = ?', (player_id,)).fetchone()
-    
-    requirement = 1000000 * (player['galaxy_tier'] + 1)
-    
-    if player['stardust'] >= requirement:
-        dark_matter = player['stardust'] * 0.001
-        cursor.execute('''
-            UPDATE players SET 
-                galaxy_tier = galaxy_tier + 1,
-                stardust = 100,
-                cosmic_energy = 100,
-                energy_capacity = 100,
-                dark_matter = dark_matter + ?,
-                last_active = CURRENT_TIMESTAMP
-            WHERE player_id = ?
-        ''', (dark_matter, player_id))
-        
-        conn.commit()
-        conn.close()
-        
-        return jsonify({'success': True, 'dark_matter_gained': dark_matter})
-    
-    conn.close()
-    return jsonify({'success': False, 'error': 'Недостаточно звёздной пыли'})
-
-@app.route('/api/reset_all')
-def reset_all():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    
-    cursor.execute('DELETE FROM players')
-    cursor.execute('DELETE FROM technologies')
-    cursor.execute('DELETE FROM artifacts')
-    cursor.execute('DELETE FROM missions')
-    cursor.execute('DELETE FROM cosmic_events')
-    cursor.execute('DELETE FROM leaderboards')
-    cursor.execute('DELETE FROM achievements')
-    
-    conn.commit()
-    conn.close()
-    
-    return jsonify({'success': True})
-
-def update_leaderboards(player_id):
-    conn = get_db()
-    cursor = conn.cursor()
-    
-    player = cursor.execute('''
-        SELECT stardust, click_power, galaxy_tier, artifacts_found 
-        FROM players WHERE player_id = ?
-    ''', (player_id,)).fetchone()
-    
-    if player:
-        categories = ['stardust', 'power', 'galaxy', 'artifacts']
-        for cat in categories:
-            cursor.execute('DELETE FROM leaderboards WHERE player_id = ? AND category = ?', (player_id, cat))
-            cursor.execute('''
-                INSERT INTO leaderboards (leaderboard_id, player_id, score, category)
-                VALUES (?, ?, ?, ?)
-            ''', (f'{player_id}_{cat}', player_id, 
-                 player['stardust'] if cat == 'stardust' else
-                 player['click_power'] if cat == 'power' else
-                 player['galaxy_tier'] if cat == 'galaxy' else
-                 player['artifacts_found'], cat))
-    
-    conn.commit()
-    conn.close()
-
 @app.route('/static/<path:filename>')
-def static_files(filename):
+def serve_static(filename):
     return send_from_directory(STATIC_DIR, filename)
 
 @app.route('/health')
@@ -584,7 +783,6 @@ def health():
     return jsonify({'status': 'ok'})
 
 if __name__ == '__main__':
-    reset_all()
     port = int(os.environ.get('PORT', 10000))
-    print(f"🚀 Cosmic Clicker запущен на порту {port}")
+    print(f"💰 Coin Clicker Master запущен на порту {port}")
     app.run(host='0.0.0.0', port=port)
