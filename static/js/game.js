@@ -1,315 +1,219 @@
-class HamsterGame {
+class CosmicClicker {
     constructor() {
-        this.coins = 100;
-        this.energy = 100;
-        this.maxEnergy = 100;
-        this.energyRegen = 1;
-        this.clickPower = 1;
-        this.autos = 0;
-        this.multiplier = 1;
-        this.prestige = 0;
-        this.level = 1;
+        this.stardust = 100.0;
+        this.energy = 100.0;
+        this.energyCapacity = 100.0;
+        this.energyRegen = 1.0;
+        this.clickPower = 1.0;
+        this.autoMiners = 0;
+        this.multiplier = 1.0;
+        this.galaxyTier = 0;
+        this.starLevel = 1;
         this.experience = 0;
+        this.darkMatter = 0;
         this.totalClicks = 0;
+        this.artifactsFound = 0;
         
-        this.userId = null;
-        this.username = 'Игрок';
-        this.upgrades = {};
-        this.achievements = [];
+        this.critChance = 0.05;
+        this.critMultiplier = 3.0;
+        
+        this.playerId = null;
+        this.username = 'Космический Исследователь';
+        this.technologies = {};
+        this.artifacts = {};
+        this.activeEvents = [];
         
         this.init();
     }
     
     async init() {
-        // Telegram
         if (window.Telegram && Telegram.WebApp) {
             const tg = Telegram.WebApp;
             tg.expand();
             tg.ready();
             
-            this.userId = tg.initDataUnsafe.user?.id || 'user_' + Date.now();
-            this.username = tg.initDataUnsafe.user?.username || 
-                           tg.initDataUnsafe.user?.first_name || 'Игрок';
+            this.playerId = tg.initDataUnsafe.user?.id || 'cosmic_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            this.username = tg.initDataUnsafe.user?.username || tg.initDataUnsafe.user?.first_name || this.username;
             
             if (tg.colorScheme === 'dark') {
-                document.body.classList.add('dark-mode');
+                document.body.classList.add('dark-theme');
             }
+            
+            if (tg.HapticFeedback) {
+                this.haptic = tg.HapticFeedback;
+            }
+        } else {
+            this.playerId = 'local_' + Date.now();
         }
         
-        this.loadGame();
+        await this.loadGame();
         this.setupEventListeners();
         this.startGameLoop();
         this.updateUI();
-        this.loadUpgrades();
-        this.loadAchievements();
-        this.updateLeaderboard('coins');
+        this.loadTechnologies();
+        this.loadArtifacts();
+        this.checkEvents();
+        this.startParticles();
         
-        // Тест изображений
-        this.testImages();
-    }
-    
-    testImages() {
-        const images = ['hamster.png', 'coin.png', 'background.png'];
-        images.forEach(img => {
-            const test = new Image();
-            test.src = `/static/images/${img}`;
-            test.onload = () => console.log(`✅ ${img} загружен`);
-            test.onerror = () => console.error(`❌ ${img} не найден`);
-        });
+        console.log('🚀 Cosmic Clicker инициализирован!');
     }
     
     async loadGame() {
         try {
-            const res = await fetch(`/api/user/${this.userId}`);
-            const data = await res.json();
+            const response = await fetch(`/api/player/${this.playerId}`);
+            const data = await response.json();
             
-            if (data.coins) {
-                this.coins = parseFloat(data.coins);
-                this.energy = parseFloat(data.energy);
-                this.maxEnergy = parseInt(data.max_energy);
+            if (data.stardust) {
+                this.stardust = parseFloat(data.stardust);
+                this.energy = parseFloat(data.cosmic_energy);
+                this.energyCapacity = parseFloat(data.energy_capacity);
                 this.energyRegen = parseFloat(data.energy_regen);
                 this.clickPower = parseFloat(data.click_power);
-                this.autos = parseInt(data.autos);
+                this.autoMiners = parseInt(data.auto_miners);
                 this.multiplier = parseFloat(data.multiplier);
-                this.prestige = parseInt(data.prestige);
-                this.level = parseInt(data.level);
+                this.galaxyTier = parseInt(data.galaxy_tier);
+                this.starLevel = parseInt(data.star_level);
                 this.experience = parseFloat(data.experience);
+                this.darkMatter = parseFloat(data.dark_matter);
                 this.totalClicks = parseInt(data.total_clicks) || 0;
+                this.artifactsFound = parseInt(data.artifacts_found) || 0;
+                
+                if (data.technologies) this.technologies = data.technologies;
+                if (data.artifacts) this.artifacts = data.artifacts;
+                if (data.active_events) this.activeEvents = data.active_events;
             }
-        } catch (e) {
-            console.log('Нет сохранения на сервере');
+        } catch (error) {
+            console.log('Загрузка сохранения:', error);
         }
         
-        // Локальное сохранение
-        const local = localStorage.getItem(`hamster_${this.userId}`);
-        if (local) {
-            const data = JSON.parse(local);
-            Object.assign(this, data);
+        const localSave = localStorage.getItem(`cosmic_${this.playerId}`);
+        if (localSave) {
+            const localData = JSON.parse(localSave);
+            Object.assign(this, localData);
         }
         
         this.saveGame();
     }
     
     saveGame() {
-        // Локально
         const saveData = {
-            coins: this.coins,
-            energy: this.energy,
-            maxEnergy: this.maxEnergy,
-            energyRegen: this.energyRegen,
-            clickPower: this.clickPower,
-            autos: this.autos,
+            stardust: this.stardust,
+            cosmic_energy: this.energy,
+            energy_capacity: this.energyCapacity,
+            energy_regen: this.energyRegen,
+            click_power: this.clickPower,
+            auto_miners: this.autoMiners,
             multiplier: this.multiplier,
-            prestige: this.prestige,
-            level: this.level,
+            galaxy_tier: this.galaxyTier,
+            star_level: this.starLevel,
             experience: this.experience,
-            totalClicks: this.totalClicks,
-            saveTime: Date.now()
+            dark_matter: this.darkMatter,
+            total_clicks: this.totalClicks,
+            artifacts_found: this.artifactsFound,
+            save_time: Date.now()
         };
         
-        localStorage.setItem(`hamster_${this.userId}`, JSON.stringify(saveData));
+        localStorage.setItem(`cosmic_${this.playerId}`, JSON.stringify(saveData));
         
-        // На сервер
         fetch('/api/save', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
-                user_id: this.userId,
+                player_id: this.playerId,
                 username: this.username,
-                coins: this.coins,
-                energy: this.energy,
-                max_energy: this.maxEnergy,
-                energy_regen: this.energyRegen,
-                click_power: this.clickPower,
-                autos: this.autos,
-                multiplier: this.multiplier,
-                total_clicks: this.totalClicks,
-                prestige: this.prestige,
-                level: this.level,
-                experience: this.experience
+                ...saveData
             })
-        });
+        }).catch(console.error);
     }
     
-    click() {
+    clickStar() {
         if (this.energy >= 1) {
-            const earned = this.clickPower * this.multiplier * (1 + this.prestige * 0.1);
-            this.coins += earned;
+            const isCritical = Math.random() < this.critChance;
+            const baseGain = this.clickPower * this.multiplier * (1 + this.galaxyTier * 0.25);
+            const gain = isCritical ? baseGain * this.critMultiplier : baseGain;
+            
+            this.stardust += gain;
             this.energy -= 1;
             this.totalClicks++;
-            this.addExperience(0.5);
+            this.addExperience(0.75);
             
-            // Эффект
-            this.createEffect(`+${earned.toFixed(2)} 💰`, '#ffd700');
-            
+            this.createClickEffect(gain, isCritical);
             this.updateUI();
             this.saveGame();
-            this.checkAchievements();
             
-            return earned;
+            if (this.haptic) {
+                this.haptic.impactOccurred(isCritical ? 'heavy' : 'light');
+            }
+            
+            return gain;
         } else {
-            this.createEffect('❌ Нет энергии!', '#ff4444');
+            this.showMessage('❌ Недостаточно энергии!', '#ff4444');
             return 0;
         }
     }
     
-    addExperience(amount) {
-        this.experience += amount;
-        const needed = this.level * 100;
+    createClickEffect(amount, isCritical) {
+        const starCore = document.getElementById('starCore');
+        const rect = starCore.getBoundingClientRect();
+        const x = rect.left + rect.width / 2;
+        const y = rect.top + rect.height / 2;
         
-        if (this.experience >= needed) {
-            this.experience -= needed;
-            this.level++;
-            this.coins += this.level * 100;
-            this.createEffect(`🎉 Уровень ${this.level}!`, '#00ff88');
-        }
-    }
-    
-    buyUpgrade(id, cost) {
-        if (this.coins >= cost) {
-            this.coins -= cost;
-            
-            switch(id) {
-                case 'click_power':
-                    this.clickPower *= 1.1;
-                    break;
-                case 'max_energy':
-                    this.maxEnergy += 50;
-                    break;
-                case 'energy_regen':
-                    this.energyRegen *= 1.2;
-                    break;
-                case 'auto_clicker':
-                    this.autos++;
-                    break;
-                case 'multiplier':
-                    this.multiplier *= 1.5;
-                    break;
-            }
-            
-            this.createEffect(`✅ Улучшение куплено!`, '#00ff88');
-            this.updateUI();
-            this.saveGame();
-            return true;
-        } else {
-            this.createEffect(`❌ Нужно ${cost} монет!`, '#ff4444');
-            return false;
-        }
-    }
-    
-    async prestige() {
-        if (this.coins >= 1000000) {
-            this.prestige++;
-            const bonus = this.coins * 0.1;
-            this.coins = 100 + bonus;
-            this.energy = 100;
-            this.maxEnergy = 100;
-            this.energyRegen = 1;
-            this.clickPower = 1;
-            this.autos = 0;
-            this.multiplier = 1;
-            this.level = 1;
-            this.experience = 0;
-            
-            this.createEffect(`👑 Престиж ${this.prestige}! +${bonus} монет`, '#ffd700');
-            this.updateUI();
-            this.saveGame();
-        } else {
-            this.createEffect('❌ Нужно 1,000,000 монет!', '#ff4444');
-        }
-    }
-    
-    updateUI() {
-        // Основные значения
-        document.getElementById('coins').textContent = this.coins.toFixed(2);
-        document.getElementById('energy').textContent = 
-            `${this.energy.toFixed(1)}/${this.maxEnergy}`;
-        document.getElementById('clickPower').textContent = this.clickPower.toFixed(2);
-        
-        // Бары
-        const energyPercent = (this.energy / this.maxEnergy) * 100;
-        document.getElementById('energyFill').style.width = energyPercent + '%';
-        
-        const xpPercent = (this.experience / (this.level * 100)) * 100;
-        document.getElementById('levelFill').style.width = xpPercent + '%';
-        
-        // Тексты
-        document.getElementById('level').textContent = this.level;
-        document.getElementById('xp').textContent = this.experience.toFixed(1);
-        document.getElementById('xpNeeded').textContent = this.level * 100;
-        document.getElementById('currentClick').textContent = 
-            (this.clickPower * this.multiplier * (1 + this.prestige * 0.1)).toFixed(2);
-        document.getElementById('autoIncome').textContent = (this.autos * 0.5).toFixed(2);
-        document.getElementById('prestige').textContent = this.prestige;
-        document.getElementById('currentPrestige').textContent = this.prestige;
-        document.getElementById('prestigeBonus').textContent = (this.prestige * 10) + '%';
-        document.getElementById('prestigeRequirement').textContent = '1,000,000';
-    }
-    
-    createEffect(text, color) {
         const effect = document.createElement('div');
-        effect.textContent = text;
+        effect.innerHTML = isCritical ? '💥' : '✨';
         effect.style.cssText = `
             position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            color: ${color};
-            font-size: 24px;
-            font-weight: bold;
-            text-shadow: 0 0 10px ${color};
+            left: ${x}px;
+            top: ${y}px;
+            font-size: ${isCritical ? '40px' : '30px'};
             z-index: 1000;
             pointer-events: none;
-            animation: floatUp 1s forwards;
+            animation: ${isCritical ? 'criticalEffect' : 'floatEffect'} 1.5s forwards;
+            color: ${isCritical ? '#ff4444' : '#ffd700'};
+            text-shadow: 0 0 ${isCritical ? '20px' : '10px'} currentColor;
+            filter: drop-shadow(0 0 ${isCritical ? '10px' : '5px'} currentColor);
         `;
         
-        document.body.appendChild(effect);
-        setTimeout(() => effect.remove(), 1000);
-    }
-    
-    setupEventListeners() {
-        // Клик хомяка
-        const hamster = document.getElementById('hamsterBtn');
-        if (hamster) {
-            hamster.addEventListener('click', (e) => {
-                const earned = this.click();
-                
-                // Анимация
-                hamster.style.transform = 'scale(0.95)';
-                setTimeout(() => hamster.style.transform = 'scale(1)', 100);
-                
-                // Вибро
-                if (window.Telegram && Telegram.WebApp?.HapticFeedback) {
-                    Telegram.WebApp.HapticFeedback.impactOccurred('light');
+        if (isCritical) {
+            const style = document.createElement('style');
+            style.textContent = `
+                @keyframes criticalEffect {
+                    0% { transform: translate(-50%, -50%) scale(0) rotate(0deg); opacity: 1; }
+                    50% { transform: translate(-50%, -50%) scale(3) rotate(180deg); opacity: 0.8; }
+                    100% { transform: translate(${Math.random() * 200 - 100}px, ${-150 - Math.random() * 100}px) scale(0) rotate(360deg); opacity: 0; }
                 }
-                
-                // Частицы
-                this.createParticles(e.clientX, e.clientY);
-            });
+            `;
+            document.head.appendChild(style);
+        }
+        
+        document.body.appendChild(effect);
+        setTimeout(() => effect.remove(), 1500);
+        
+        if (!isCritical) {
+            this.createStardustParticles(x, y, amount);
         }
     }
     
-    createParticles(x, y) {
-        for (let i = 0; i < 5; i++) {
+    createStardustParticles(x, y, amount) {
+        for (let i = 0; i < Math.min(10, Math.floor(amount / 10)); i++) {
             const particle = document.createElement('div');
-            particle.innerHTML = '💰';
+            particle.innerHTML = '💎';
             particle.style.cssText = `
                 position: fixed;
                 left: ${x}px;
                 top: ${y}px;
-                font-size: 20px;
+                font-size: 16px;
                 z-index: 999;
                 pointer-events: none;
-                animation: particle${i} 1s forwards;
+                animation: particle${i} 2s forwards;
             `;
             
-            // Динамический CSS для анимации
             const style = document.createElement('style');
             style.textContent = `
                 @keyframes particle${i} {
-                    0% { transform: translate(0, 0) scale(1); opacity: 1; }
+                    0% { transform: translate(0, 0) scale(1) rotate(0deg); opacity: 1; }
                     100% { 
-                        transform: translate(${Math.random() * 100 - 50}px, ${Math.random() * -100 - 50}px) scale(0); 
+                        transform: translate(${Math.random() * 300 - 150}px, ${Math.random() * 200 + 100}px) 
+                                   scale(0) rotate(${Math.random() * 360}deg); 
                         opacity: 0; 
                     }
                 }
@@ -317,167 +221,420 @@ class HamsterGame {
             document.head.appendChild(style);
             
             document.body.appendChild(particle);
-            setTimeout(() => particle.remove(), 1000);
+            setTimeout(() => {
+                particle.remove();
+                if (document.head.contains(style)) {
+                    document.head.removeChild(style);
+                }
+            }, 2000);
         }
     }
     
-    startGameLoop() {
-        // Восстановление энергии
-        setInterval(() => {
-            if (this.energy < this.maxEnergy) {
-                this.energy = Math.min(this.maxEnergy, this.energy + this.energyRegen);
-                this.updateUI();
-            }
-        }, 1000);
+    addExperience(amount) {
+        this.experience += amount;
+        const needed = this.starLevel * 100;
         
-        // Авто-кликеры
-        setInterval(() => {
-            if (this.autos > 0) {
-                const earned = this.autos * 0.5 * this.multiplier;
-                this.coins += earned;
+        if (this.experience >= needed) {
+            this.experience -= needed;
+            this.starLevel++;
+            this.stardust += this.starLevel * 250;
+            this.energyCapacity += 50;
+            
+            this.showMessage(`🌟 Уровень ${this.starLevel}! +${this.starLevel * 250} звёздной пыли`, '#ffd700');
+            
+            if (this.starLevel % 5 === 0) {
+                this.discoverArtifact();
+            }
+        }
+    }
+    
+    async discoverArtifact() {
+        try {
+            const response = await fetch('/api/artifacts/discover', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({player_id: this.playerId})
+            });
+            
+            const result = await response.json();
+            if (result.success) {
+                this.artifactsFound++;
+                this.artifacts[result.artifact.id] = result.artifact.power;
+                this.multiplier *= result.artifact.power;
+                
+                this.showMessage(`🔮 Найден артефакт: ${result.artifact.name}! Множитель x${result.artifact.power}`, '#d9a1ff');
                 this.updateUI();
                 this.saveGame();
             }
-        }, 1000);
-        
-        // Сохранение каждые 30 секунд
-        setInterval(() => this.saveGame(), 30000);
-    }
-    
-    async loadUpgrades() {
-        const upgrades = [
-            {id: 'click_power', name: 'Усиление', desc: '+10% силы', cost: 50, icon: '💪'},
-            {id: 'max_energy', name: 'Энергия', desc: '+50 энергии', cost: 100, icon: '⚡'},
-            {id: 'energy_regen', name: 'Реген', desc: '+20% восстановления', cost: 200, icon: '🔄'},
-            {id: 'auto_clicker', name: 'Авто-кликер', desc: '+0.5 монет/сек', cost: 500, icon: '🤖'},
-            {id: 'multiplier', name: 'Множитель', desc: 'x1.5 доход', cost: 1000, icon: '🚀'}
-        ];
-        
-        const grid = document.getElementById('upgradesGrid');
-        if (!grid) return;
-        
-        grid.innerHTML = upgrades.map(up => `
-            <div class="upgrade-item" onclick="game.buyUpgrade('${up.id}', ${up.cost})">
-                <div class="upgrade-icon">${up.icon}</div>
-                <div class="upgrade-name">${up.name}</div>
-                <div class="upgrade-desc">${up.desc}</div>
-                <div class="upgrade-cost">${up.cost} 💰</div>
-            </div>
-        `).join('');
-    }
-    
-    async loadAchievements() {
-        try {
-            const res = await fetch(`/api/achievements/${this.userId}`);
-            this.achievements = await res.json();
-            
-            const grid = document.getElementById('achievementsGrid');
-            if (!grid) return;
-            
-            grid.innerHTML = this.achievements.map(ach => `
-                <div class="achievement-item ${ach.unlocked ? 'unlocked' : ''}">
-                    <div style="font-size: 2rem; margin-bottom: 10px;">🏆</div>
-                    <div style="font-weight: bold; margin-bottom: 5px;">${ach.name}</div>
-                    <div style="font-size: 0.9rem; opacity: 0.8; margin-bottom: 5px;">${ach.description}</div>
-                    <div style="font-size: 0.8rem;">
-                        Прогресс: ${ach.progress || 0}/${ach.target}
-                        ${ach.unlocked ? '<br>✅ Выполнено!' : ''}
-                    </div>
-                </div>
-            `).join('');
-        } catch (e) {
-            console.error('Ошибка загрузки достижений:', e);
+        } catch (error) {
+            console.error('Ошибка при обнаружении артефакта:', error);
         }
     }
     
-    checkAchievements() {
-        // Проверяем выполненные достижения
-        this.achievements.forEach(ach => {
-            if (!ach.unlocked) {
-                let progress = 0;
-                
-                switch(ach.achievement_id) {
-                    case 'first_click':
-                        progress = this.totalClicks;
-                        break;
-                    case '100_coins':
-                        progress = this.coins;
-                        break;
-                    case 'max_energy':
-                        progress = this.maxEnergy;
-                        break;
-                }
-                
-                if (progress >= ach.target) {
-                    this.createEffect(`🏆 ${ach.name} разблокировано!`, '#ffd700');
-                }
+    buyUpgrade(id, cost) {
+        if (this.stardust >= cost) {
+            this.stardust -= cost;
+            
+            switch(id) {
+                case 'quantum_amplifier':
+                    this.clickPower *= 1.15;
+                    break;
+                case 'energy_core':
+                    this.energyCapacity += 100;
+                    break;
+                case 'stellar_reactor':
+                    this.energyRegen *= 1.25;
+                    break;
+                case 'auto_miner':
+                    this.autoMiners++;
+                    break;
+                case 'multiplier_circuit':
+                    this.multiplier *= 1.3;
+                    break;
+                case 'critical_enhancer':
+                    this.critChance += 0.02;
+                    this.critMultiplier += 0.5;
+                    break;
             }
+            
+            fetch('/api/upgrade', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    player_id: this.playerId,
+                    tech_id: id,
+                    cost: cost
+                })
+            }).catch(console.error);
+            
+            this.showMessage('✅ Улучшение приобретено!', '#00ff88');
+            this.updateUI();
+            this.saveGame();
+            return true;
+        } else {
+            this.showMessage(`❌ Необходимо ${cost} звёздной пыли!`, '#ff4444');
+            return false;
+        }
+    }
+    
+    async ascendGalaxy() {
+        const requirement = 1000000 * (this.galaxyTier + 1);
+        
+        if (this.stardust >= requirement) {
+            try {
+                const response = await fetch('/api/ascend', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({player_id: this.playerId})
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    const oldTier = this.galaxyTier;
+                    this.galaxyTier++;
+                    this.stardust = 100;
+                    this.energy = 100;
+                    this.energyCapacity = 100;
+                    this.darkMatter += result.dark_matter_gained;
+                    
+                    this.showMessage(`🌌 Аскенд в галактику ${this.galaxyTier}! +${result.dark_matter_gained.toFixed(2)} тёмной материи`, '#8a2be2');
+                    this.updateUI();
+                    this.saveGame();
+                }
+            } catch (error) {
+                console.error('Ошибка аскенда:', error);
+            }
+        } else {
+            this.showMessage(`❌ Необходимо ${requirement.toLocaleString()} звёздной пыли!`, '#ff4444');
+        }
+    }
+    
+    updateUI() {
+        document.getElementById('stardust').textContent = this.stardust.toFixed(2);
+        document.getElementById('energy').textContent = `${this.energy.toFixed(1)}/${this.energyCapacity}`;
+        document.getElementById('darkMatter').textContent = this.darkMatter.toFixed(4);
+        
+        document.getElementById('energyFill').style.width = `${(this.energy / this.energyCapacity) * 100}%`;
+        document.getElementById('xpFill').style.width = `${(this.experience / (this.starLevel * 100)) * 100}%`;
+        
+        document.getElementById('starLevel').textContent = this.starLevel;
+        document.getElementById('galaxyTier').textContent = this.galaxyTier;
+        document.getElementById('xp').textContent = this.experience.toFixed(1);
+        document.getElementById('xpNeeded').textContent = this.starLevel * 100;
+        
+        const clickGain = this.clickPower * this.multiplier * (1 + this.galaxyTier * 0.25);
+        document.getElementById('clickPower').textContent = clickGain.toFixed(2);
+        document.getElementById('energyCost').textContent = '1.00';
+        document.getElementById('critChance').textContent = `${(this.critChance * 100).toFixed(1)}%`;
+        
+        const autoIncome = this.autoMiners * 0.75 * this.multiplier;
+        document.getElementById('autoIncome').textContent = autoIncome.toFixed(2);
+        document.getElementById('minerCount').textContent = `(${this.autoMiners} майнеров)`;
+        document.getElementById('stardustPerSecond').textContent = `${autoIncome.toFixed(2)}/сек`;
+        
+        const galaxyNames = ['Млечный Путь', 'Андромеда', 'Треугольник', 'Сигара', 'Сомбреро'];
+        document.getElementById('currentGalaxy').textContent = galaxyNames[this.galaxyTier % galaxyNames.length];
+        document.getElementById('nextGalaxy').textContent = galaxyNames[(this.galaxyTier + 1) % galaxyNames.length];
+        
+        const requirement = 1000000 * (this.galaxyTier + 1);
+        document.getElementById('galaxyRequirement').textContent = requirement.toLocaleString();
+    }
+    
+    showMessage(text, color) {
+        const message = document.createElement('div');
+        message.textContent = text;
+        message.style.cssText = `
+            position: fixed;
+            top: 20%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.85);
+            color: ${color};
+            padding: 15px 30px;
+            border-radius: 15px;
+            z-index: 2000;
+            font-size: 1.3rem;
+            font-weight: bold;
+            border-left: 5px solid ${color};
+            box-shadow: 0 5px 25px rgba(0,0,0,0.5);
+            animation: messageSlide 0.3s ease-out;
+            backdrop-filter: blur(10px);
+        `;
+        
+        document.body.appendChild(message);
+        setTimeout(() => message.remove(), 2000);
+    }
+    
+    setupEventListeners() {
+        const starCore = document.getElementById('starCore');
+        if (starCore) {
+            starCore.addEventListener('click', (e) => {
+                this.clickStar();
+            });
+        }
+        
+        const ascendBtn = document.getElementById('ascendGalaxyBtn');
+        if (ascendBtn) {
+            ascendBtn.addEventListener('click', () => {
+                this.ascendGalaxy();
+            });
+        }
+        
+        document.querySelectorAll('[data-upgrade]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const upgradeId = e.currentTarget.dataset.upgrade;
+                const cost = parseFloat(e.currentTarget.dataset.cost);
+                this.buyUpgrade(upgradeId, cost);
+            });
         });
     }
     
-    async updateLeaderboard(type = 'coins') {
-        try {
-            const res = await fetch(`/api/leaderboard/${type}`);
-            const players = await res.json();
+    startGameLoop() {
+        setInterval(() => {
+            if (this.energy < this.energyCapacity) {
+                this.energy = Math.min(this.energyCapacity, this.energy + this.energyRegen);
+            }
             
-            const content = document.getElementById('leaderboardContent');
-            if (!content) return;
+            if (this.autoMiners > 0) {
+                const autoGain = this.autoMiners * 0.75 * this.multiplier;
+                this.stardust += autoGain;
+            }
             
-            content.innerHTML = players.map((p, i) => `
-                <div class="leaderboard-item ${p.user_id === this.userId ? 'you' : ''}">
-                    <div class="rank ${i < 3 ? `rank-${i+1}` : ''}">${i + 1}</div>
-                    <div style="flex: 1;">
-                        <div style="font-weight: bold;">${p.username}</div>
-                        <div style="font-size: 0.9rem; opacity: 0.8;">
-                            ${type === 'coins' ? `💰 ${p.coins}` : ''}
-                            ${type === 'power' ? `💪 ${p.click_power}` : ''}
-                            ${type === 'prestige' ? `👑 ${p.prestige}` : ''}
-                            ${type === 'level' ? `⭐ ${p.level}` : ''}
-                        </div>
+            this.updateUI();
+            this.saveGame();
+        }, 1000);
+        
+        setInterval(() => this.randomEvent(), 300000);
+        setInterval(() => this.saveGame(), 30000);
+    }
+    
+    randomEvent() {
+        const events = [
+            {type: 'cosmic_storm', name: 'Космический шторм', multiplier: 1.5, duration: 120},
+            {type: 'quantum_surge', name: 'Квантовый скачок', multiplier: 2.0, duration: 60},
+            {type: 'dark_matter_rain', name: 'Дождь тёмной материи', multiplier: 1.0, duration: 180}
+        ];
+        
+        const event = events[Math.floor(Math.random() * events.length)];
+        this.activeEvents.push({
+            ...event,
+            endsAt: Date.now() + event.duration * 1000
+        });
+        
+        this.multiplier *= event.multiplier;
+        
+        const banner = document.getElementById('eventBanner');
+        const timer = document.getElementById('eventTimer');
+        const text = document.querySelector('.event-text');
+        
+        if (banner && timer && text) {
+            text.textContent = `${event.name}: +${((event.multiplier - 1) * 100)}% к добыче!`;
+            banner.style.display = 'block';
+            
+            const updateTimer = () => {
+                const remaining = Math.max(0, event.duration - (Date.now() - (this.activeEvents[this.activeEvents.length - 1].endsAt - event.duration * 1000)) / 1000);
+                const minutes = Math.floor(remaining / 60);
+                const seconds = Math.floor(remaining % 60);
+                timer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                
+                if (remaining > 0) {
+                    setTimeout(updateTimer, 1000);
+                } else {
+                    banner.style.display = 'none';
+                    this.multiplier /= event.multiplier;
+                    this.activeEvents = this.activeEvents.filter(e => e.endsAt > Date.now());
+                }
+            };
+            
+            updateTimer();
+        }
+        
+        this.showMessage(`🌌 ${event.name} начался!`, '#ff00ff');
+        this.updateUI();
+    }
+    
+    checkEvents() {
+        const now = Date.now();
+        this.activeEvents = this.activeEvents.filter(event => {
+            if (event.endsAt > now) return true;
+            this.multiplier /= event.multiplier;
+            return false;
+        });
+    }
+    
+    startParticles() {
+        setInterval(() => {
+            if (Math.random() > 0.7) {
+                this.createBackgroundParticle();
+            }
+        }, 300);
+    }
+    
+    createBackgroundParticle() {
+        const particle = document.createElement('div');
+        particle.innerHTML = Math.random() > 0.5 ? '✨' : '💫';
+        particle.style.cssText = `
+            position: fixed;
+            left: ${Math.random() * 100}%;
+            top: ${Math.random() * 100}%;
+            font-size: ${Math.random() * 20 + 10}px;
+            z-index: 0;
+            pointer-events: none;
+            opacity: ${Math.random() * 0.3 + 0.1};
+            animation: floatParticle ${Math.random() * 10 + 10}s linear infinite;
+        `;
+        
+        document.body.appendChild(particle);
+        setTimeout(() => particle.remove(), 15000);
+    }
+    
+    async loadTechnologies() {
+        const techs = [
+            {id: 'quantum_amplifier', name: 'Квантовый усилитель', desc: '+15% к силе клика', cost: 500, icon: '⚡'},
+            {id: 'energy_core', name: 'Энергоядро', desc: '+100 к ёмкости энергии', cost: 1000, icon: '🔋'},
+            {id: 'stellar_reactor', name: 'Звёздный реактор', desc: '+25% к регенерации', cost: 2500, icon: '☀️'},
+            {id: 'auto_miner', name: 'Авто-майнер', desc: '+0.75 пыли/сек', cost: 5000, icon: '⛏️'},
+            {id: 'multiplier_circuit', name: 'Мультипликатор', desc: 'x1.3 ко всей добыче', cost: 15000, icon: '🌀'},
+            {id: 'critical_enhancer', name: 'Критический усилитель', desc: '+2% шанс, +0.5 множитель', cost: 30000, icon: '💥'}
+        ];
+        
+        const grid = document.getElementById('upgradesGrid');
+        if (grid) {
+            grid.innerHTML = techs.map(tech => `
+                <div class="upgrade-item" data-upgrade="${tech.id}" data-cost="${tech.cost}">
+                    <div style="font-size: 3rem; margin-bottom: 15px;">${tech.icon}</div>
+                    <div style="font-size: 1.3rem; font-weight: bold; margin-bottom: 10px;">${tech.name}</div>
+                    <div style="opacity: 0.9; margin-bottom: 15px;">${tech.desc}</div>
+                    <div style="color: #ffd700; font-size: 1.4rem; font-weight: bold;">
+                        ${tech.cost.toLocaleString()} 💎
                     </div>
                 </div>
             `).join('');
-        } catch (e) {
-            console.error('Ошибка загрузки лидерборда:', e);
+        }
+    }
+    
+    async loadArtifacts() {
+        const grid = document.getElementById('artifactsGrid');
+        if (grid) {
+            const artifacts = Object.entries(this.artifacts).map(([id, power]) => ({
+                id, power, 
+                name: id.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+            }));
+            
+            if (artifacts.length === 0) {
+                grid.innerHTML = '<div style="text-align: center; padding: 40px; color: #888;">Артефакты ещё не найдены</div>';
+            } else {
+                grid.innerHTML = artifacts.map(art => `
+                    <div class="artifact-card">
+                        <div style="font-size: 4rem; margin-bottom: 15px;">🔮</div>
+                        <div style="font-size: 1.4rem; font-weight: bold; margin-bottom: 10px;">${art.name}</div>
+                        <div style="color: #d9a1ff; font-size: 1.2rem;">Множитель: x${art.power}</div>
+                    </div>
+                `).join('');
+            }
+        }
+    }
+    
+    async updateLeaderboard(category = 'stardust') {
+        try {
+            const response = await fetch(`/api/leaderboard/${category}`);
+            const players = await response.json();
+            
+            const table = document.getElementById('leaderboardTable');
+            if (table) {
+                table.innerHTML = players.map((player, index) => `
+                    <div class="leaderboard-row ${player.player_id === this.playerId ? 'your-row' : ''}">
+                        <div class="leaderboard-rank ${index < 3 ? `rank-${index + 1}` : ''}">
+                            ${index + 1}
+                        </div>
+                        <div style="flex: 1;">
+                            <div style="font-weight: bold; font-size: 1.2rem;">${player.username}</div>
+                            <div style="opacity: 0.8; margin-top: 5px;">
+                                ${category === 'stardust' ? `💎 ${parseFloat(player.stardust).toLocaleString()}` : ''}
+                                ${category === 'power' ? `⚡ ${parseFloat(player.click_power).toFixed(2)}` : ''}
+                                ${category === 'galaxy' ? `🌌 ${player.galaxy_tier}` : ''}
+                                ${category === 'artifacts' ? `🔮 ${player.artifacts_found}` : ''}
+                                <span style="margin-left: 15px; color: #ffd700;">⭐ ${player.star_level}</span>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        } catch (error) {
+            console.error('Ошибка загрузки лидерборда:', error);
         }
     }
 }
 
-// Инициализация игры
-let game;
-document.addEventListener('DOMContentLoaded', () => {
-    game = new HamsterGame();
-    window.game = game;
-    
-    // CSS для анимаций
-    const style = document.createElement('style');
-    style.textContent = `
-        @keyframes floatUp {
-            0% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-            100% { opacity: 0; transform: translate(-50%, -100px) scale(1.5); }
-        }
-        
-        .dark-mode {
-            filter: brightness(0.9);
-        }
-    `;
-    document.head.appendChild(style);
-});
+let game = new CosmicClicker();
+window.game = game;
 
-// Глобальные функции
-function showTab(tab) {
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.getElementById(tab).classList.add('active');
-    event.target.classList.add('active');
-    
-    if (tab === 'leaderboard') {
-        game.updateLeaderboard('coins');
+window.updateLeaderboard = (category) => game.updateLeaderboard(category);
+
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes floatEffect {
+        0% { transform: translate(-50%, -50%) scale(1) rotate(0deg); opacity: 1; }
+        100% { transform: translate(${Math.random() * 100 - 50}px, -150px) scale(0) rotate(180deg); opacity: 0; }
     }
-}
-
-function showLeaderboard(type) {
-    document.querySelectorAll('.lb-tab').forEach(b => b.classList.remove('active'));
-    event.target.classList.add('active');
-    game.updateLeaderboard(type);
-}
+    
+    @keyframes messageSlide {
+        from { transform: translateX(-50%) translateY(-100px); opacity: 0; }
+        to { transform: translateX(-50%) translateY(0); opacity: 1; }
+    }
+    
+    @keyframes floatParticle {
+        0% { transform: translateY(100vh) rotate(0deg); }
+        100% { transform: translateY(-100px) rotate(360deg); }
+    }
+    
+    .your-row {
+        background: rgba(0, 238, 255, 0.2) !important;
+        border-left: 5px solid #00eeff;
+    }
+    
+    .dark-theme {
+        filter: brightness(0.95) contrast(1.1);
+    }
+`;
+document.head.appendChild(style);
